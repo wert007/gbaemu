@@ -1,0 +1,6 @@
+target
+assets/gba_bios.bin
+*.txt
+assets
+screenshots
+references

@@ -1,0 +1,3 @@
+[workspace]
+members = ["disasm", "gbaemu", "gbaemu-core", "stackvec"]
+resolver = "2"
