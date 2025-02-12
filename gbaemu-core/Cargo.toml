@@ -1,0 +1,12 @@
+[package]
+name = "gbaemu-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+armv4t_emu = "0.1.2"
+colorable = "0.1.4"
+image = "0.25.5"
+stackvec = { version = "0.1.0", path = "../stackvec" }
+strum = { version = "0.26.3", features = ["derive"] }
+thiserror = "1.0.64"
