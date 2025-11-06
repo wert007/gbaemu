@@ -96,7 +96,7 @@ impl Memory {
     // const BIOS_SIZE: usize = include_bytes!("../../assets/gba_bios.bin").len();
     pub fn new() -> Self {
         let mut raw = vec![0; 0x0FFFFFFF];
-        let bios = include_bytes!("../../assets/foss_bios.bin");
+        let bios = include_bytes!("../../assets/gba_bios.bin");
         unsafe {
             assert!(bios.len() <= raw.len());
             ptr::copy_nonoverlapping(bios.as_ptr(), raw.as_mut_ptr(), bios.len());

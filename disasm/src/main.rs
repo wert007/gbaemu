@@ -1,7 +1,7 @@
 use unarm::{DisplayOptions, RegNames};
 
 fn main() {
-    let bios = include_bytes!("../../assets/foss_bios.bin");
+    let bios = include_bytes!("../../assets/gba_bios.bin");
     for (addr, _inst, p) in unarm::Parser::new(
         unarm::ParseMode::Arm,
         0,

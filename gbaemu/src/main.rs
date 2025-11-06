@@ -134,8 +134,9 @@ fn make_screenshot(buffer: &[u32]) {
     if !std::path::Path::new("screenshots/").exists() {
         std::fs::create_dir("screenshots/").unwrap();
     }
+    let counter = unsafe { COUNTER };
+    image.save(format!("screenshots/s{counter}.png")).unwrap();
     unsafe {
-        image.save(format!("screenshots/s{COUNTER}.png")).unwrap();
         COUNTER += 1;
     }
 }
