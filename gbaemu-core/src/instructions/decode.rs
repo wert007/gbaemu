@@ -107,6 +107,29 @@ impl Instruction {
                                 read_size: StoreLoadMemorySize::SignedHalfword,
                             },
                         }),
+                        0b1001 => {
+                            let rm = (word & 0xF00) >> 8;
+                            let rm = RegisterIndex::try_from(rm)
+                                .map_err(|()| InstructionDecodeError::InvalidRegisterIndex(rm))?;
+
+                            let rn = word & 0xF;
+                            let rn = RegisterIndex::try_from(rn)
+                                .map_err(|()| InstructionDecodeError::InvalidRegisterIndex(rn))?;
+                            let rd = (word & 0xF0000) >> 16;
+                            let rd = RegisterIndex::try_from(rd)
+                                .map_err(|()| InstructionDecodeError::InvalidRegisterIndex(rd))?;
+
+                            Ok(Instruction {
+                                condition,
+                                op: InstructionOp::ShifterOperandInstruction {
+                                    op: ShifterOperandInstructionOp::Multiplicate,
+                                    update_flags,
+                                    base: rn,
+                                    destination: rd,
+                                    value: ShifterOperand::Register(rm),
+                                },
+                            })
+                        }
                         _ => Err(InstructionDecodeError::UnknownArm(word)),
                     };
                     // return Ok(Instruction {

@@ -129,7 +129,7 @@ impl Registers {
         PsrRegister(self.read(RegisterIndex::Cpsr))
     }
 
-    pub(crate) fn cpsr_mut(&mut self) -> PsrRegisterMut {
+    pub(crate) fn cpsr_mut(&mut self) -> PsrRegisterMut<'_> {
         PsrRegisterMut(self.get_mut(RegisterIndex::Cpsr))
     }
 

@@ -3,10 +3,13 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use image::{ImageBuffer, Rgb};
+use image::Rgb;
+
+mod obj;
 
 use crate::{
     interrupts::Interrupt,
+    io_registers::lcd::obj::Obj,
     memory::{MemoryPlugin, SimpleMemory},
 };
 
@@ -56,7 +59,14 @@ pub struct Color {
     g: f32,
     b: f32,
 }
+
 impl Color {
+    const RED: Color = Self {
+        r: 1.0,
+        g: 0.0,
+        b: 0.0,
+    };
+
     fn from_raw(half_word: u16) -> Self {
         let r = half_word & 0x001f;
         let g = (half_word & 0x03e0) >> 5;
@@ -297,7 +307,7 @@ impl Lcd {
         match self.display_mode() {
             DisplayMode::DisplayMode0 => self.render_display_mode_0(),
             DisplayMode::DisplayMode1 => todo!(),
-            DisplayMode::DisplayMode2 => todo!(),
+            DisplayMode::DisplayMode2 => self.render_display_mode_2(),
             DisplayMode::DisplayMode3 => todo!(),
             DisplayMode::DisplayMode4 => todo!(),
             DisplayMode::DisplayMode5 => todo!(),
@@ -312,10 +322,60 @@ impl Lcd {
         if !screen_display_obj {
             return;
         }
+        let objs = self.collect_objs();
+        for screen_y in vert_lines(
+            self.last_rendered_line,
+            self.memory_interface.vertical_count.min(160),
+        ) {
+            for screen_x in 0..240 {
+                for color in objs.iter().filter_map(|o| {
+                    o.color_at(
+                        screen_x,
+                        screen_y,
+                        &self.vram.lock().unwrap(),
+                        &self.color_ram.lock().unwrap(),
+                    )
+                }) {
+                    let buffer_index = screen_y * 240 + screen_x;
+                    self.buffer[buffer_index as usize] = color.to_rgb();
+                }
+            }
+        }
+        // dbg!(objs);
         // todo!()
     }
 
     fn render_display_mode_0(&mut self) {
+        let background_color = self.color_ram.lock().unwrap().read_half_word(0x5000000);
+        let background_color = Color::from_raw(background_color).to_rgb();
+        for screen_y in vert_lines(
+            self.last_rendered_line,
+            self.memory_interface.vertical_count.min(160),
+        ) {
+            for screen_x in 0..240 {
+                let buffer_index = screen_y as usize * 240 + screen_x;
+                self.buffer[buffer_index] = background_color;
+            }
+        }
+        for priority in 0..4 {
+            for background in 0..4 {
+                let background_priority =
+                    self.memory_interface.background_control[background].priority();
+
+                if priority != background_priority {
+                    continue;
+                }
+                let screen_display_bg =
+                    (self.memory_interface.display_control & (0x0100 << background)) > 0;
+                if !screen_display_bg {
+                    continue;
+                }
+                self.render_background_regular(background);
+            }
+        }
+    }
+
+    fn render_display_mode_2(&mut self) {
         let background_color = self.color_ram.lock().unwrap().read_half_word(0x5000000);
         let background_color = Color::from_raw(background_color).to_rgb();
         for screen_y in vert_lines(
@@ -394,7 +454,7 @@ impl Lcd {
                     let entry = TileMapEntry(vram.read_half_word(map_address as usize));
                     let tile_addr = tileset_base + entry.tile_index() as u32 * tile_size;
 
-                    let index = self.read_pixel_index(
+                    let index = read_pixel_index(
                         &vram,
                         pixel_format,
                         tile_addr,
@@ -419,32 +479,6 @@ impl Lcd {
                         return;
                     }
                 }
-            }
-        }
-    }
-
-    pub fn read_pixel_index(
-        &self,
-        vram: &SimpleMemory,
-        format: PixelFormat,
-        address: u32,
-        x: u32,
-        y: u32,
-    ) -> u8 {
-        match format {
-            PixelFormat::Bpp4 => {
-                let offset = address + (4 * y + (x / 2));
-                let offset = offset as usize;
-                let byte = vram.read_byte(offset + 0x6000000);
-                if x & 1 != 0 {
-                    (byte >> 4) as u8
-                } else {
-                    (byte & 0xf) as u8
-                }
-            }
-            PixelFormat::Bpp8 => {
-                let offset = address as usize + 0x6000000;
-                vram.read_byte(offset + (8 * (y as usize) + (x as usize))) as u8
             }
         }
     }
@@ -490,6 +524,62 @@ impl Lcd {
             .chunks_exact(2)
             .map(|b| Color::from_raw(u16::from_le_bytes([b[0], b[1]])).to_rgb())
             .collect()
+    }
+
+    pub(crate) fn load_tiles(&self, format: PixelFormat) -> Vec<Vec<u8>> {
+        let vram = self.vram.lock().unwrap();
+        let bytes = &vram.as_bytes()[0x10000..];
+        match format {
+            PixelFormat::Bpp4 => {
+                bytes
+                    .chunks_exact(8 * 8 / 2)
+                    .map(|b| {
+                        b.into_iter()
+                            .flat_map(|b| [b & 0xf0 >> 4, b & 0xf])
+                            // .flat_map(|b| [b & 0xf, b & 0xf0 >> 4])
+                            .collect::<Vec<u8>>()
+                    })
+                    .collect()
+            }
+            PixelFormat::Bpp8 => bytes.chunks_exact(8 * 8).map(|b| b.to_vec()).collect(),
+        }
+        // tiles
+    }
+
+    fn collect_objs(&self) -> Vec<Obj> {
+        self.obj_ram
+            .lock()
+            .unwrap()
+            .as_bytes()
+            .chunks_exact(8)
+            .map(|b| Obj::from_obj_ram(b))
+            .filter(|o| o.is_enabled() && o.size().is_some())
+            .collect()
+    }
+}
+
+pub fn read_pixel_index(
+    vram: &SimpleMemory,
+    format: PixelFormat,
+    address: u32,
+    x: u32,
+    y: u32,
+) -> u8 {
+    match format {
+        PixelFormat::Bpp4 => {
+            let offset = address + (4 * y + (x / 2));
+            let offset = offset as usize;
+            let byte = vram.read_byte(offset + 0x6000000);
+            if x & 1 != 0 {
+                (byte >> 4) as u8
+            } else {
+                (byte & 0xf) as u8
+            }
+        }
+        PixelFormat::Bpp8 => {
+            let offset = address as usize + 0x6000000;
+            vram.read_byte(offset + (8 * (y as usize) + (x as usize))) as u8
+        }
     }
 }
 

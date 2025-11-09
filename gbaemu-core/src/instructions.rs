@@ -71,7 +71,7 @@ impl Condition {
             Condition::OverflowSet => flags.overflow_flag,
             Condition::OverflowClear => !flags.overflow_flag,
             Condition::UnsignedHigher => flags.carry_flag && !flags.zero_flag,
-            Condition::UnsignedLowerOrSame => !flags.carry_flag && flags.zero_flag,
+            Condition::UnsignedLowerOrSame => !flags.carry_flag || flags.zero_flag,
             Condition::GreaterThanEquals => flags.negative_flag == flags.overflow_flag,
             Condition::LessThan => flags.negative_flag != flags.overflow_flag,
             Condition::GreaterThan => {

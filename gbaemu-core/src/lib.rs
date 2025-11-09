@@ -9,12 +9,16 @@ use io_registers::{lcd::Lcd, GbaIo};
 use memory::{Memory, MemoryPlugin, SimpleMemory};
 use registers::{Mode, RegisterIndex, RegisterList, Registers};
 
+use crate::{io_registers::lcd::PixelFormat, plugins::Plugin};
+
 mod bitmod;
 mod instructions;
 mod interrupts;
 mod io_registers;
 pub mod memory;
+pub mod plugins;
 pub mod registers;
+pub use crate::io_registers::lcd;
 
 #[cfg(test)]
 mod tests;
@@ -103,6 +107,7 @@ pub struct Gba {
     gba_io: Arc<Mutex<GbaIo>>,
     vram: Arc<Mutex<SimpleMemory>>,
     flag: bool,
+    plugins: Vec<Box<dyn Plugin>>,
 }
 
 impl Gba {
@@ -134,7 +139,13 @@ impl Gba {
             gba_io,
             vram,
             flag: false,
+            plugins: Vec::new(),
         }
+    }
+
+    pub fn with_plugin(&mut self, plugin: impl Plugin + 'static) -> &mut Self {
+        self.plugins.push(Box::new(plugin));
+        self
     }
 
     pub fn run_cycle(&mut self) -> bool {
@@ -145,9 +156,17 @@ impl Gba {
             self.raise_interrupt(interrupt);
         }
         let mode = self.registers.cpsr().mode();
-        let instruction = self.fetch().expect("Valid Instruction");
         let ip = self.registers.read_raw(RegisterIndex::Ip);
-        println!("pc: 0x{ip:08x}");
+        let instruction = self.fetch().unwrap_or_else(|e| {
+            // dbg!(self);
+            panic!("Invalid Instruction at {ip}., {e}")
+        });
+        // println!("pc: 0x{ip:08x}");
+        for plugin in &mut self.plugins {
+            if !plugin.should_execute(&registers, mode, &instruction, ip) {
+                return true;
+            }
+        }
 
         let increment = if instruction.increments_instruction_pointer(self) {
             0
@@ -194,6 +213,10 @@ impl Gba {
         instruction.execute(self);
         if !instruction.increments_instruction_pointer(self) {
             self.registers.write(RegisterIndex::Ip, ip + increment);
+        }
+
+        for plugin in &mut self.plugins {
+            plugin.after_executing(&self.registers, mode, &instruction, ip);
         }
 
         if !self.args.silent && VERBOSE {
@@ -284,6 +307,10 @@ impl Gba {
 
     pub fn load_palette(&self) -> Vec<u32> {
         self.gba_io.lock().unwrap().lcd.load_palette()
+    }
+
+    pub fn load_tiles(&self, format: PixelFormat) -> Vec<Vec<u8>> {
+        self.gba_io.lock().unwrap().lcd.load_tiles(format)
     }
 
     fn raise_interrupt(&mut self, interrupt: interrupts::Interrupt) {

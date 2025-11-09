@@ -4,22 +4,37 @@ use super::*;
 
 #[test]
 fn decode_set_of_instructions_correct() {
-    let input = [(
-        0xe8bd5000u32,
-        Instruction {
-            condition: Condition::Always,
-            op: InstructionOp::StoreOrLoadRegisters {
-                is_load: true,
-                register_base: RegisterIndex::Sp,
-                register_base_write_back: true,
-                register_list: RegisterList::from_registers([
-                    RegisterIndex::Lr,
-                    RegisterIndex::R12,
-                ]),
-                addressing_mode: StoreLoadManyAddressingMode::IncrementAfter,
+    let input = [
+        (
+            0xe8bd5000u32,
+            Instruction {
+                condition: Condition::Always,
+                op: InstructionOp::StoreOrLoadRegisters {
+                    is_load: true,
+                    register_base: RegisterIndex::Sp,
+                    register_base_write_back: true,
+                    register_list: RegisterList::from_registers([
+                        RegisterIndex::Lr,
+                        RegisterIndex::R12,
+                    ]),
+                    addressing_mode: StoreLoadManyAddressingMode::IncrementAfter,
+                },
             },
-        },
-    )];
+        ),
+        (
+            0xE008099Bu32,
+            Instruction {
+                condition: Condition::Always,
+                op: InstructionOp::ShifterOperandInstruction {
+                    op: ShifterOperandInstructionOp::Multiplicate,
+                    update_flags: false,
+                    base: RegisterIndex::R11,
+                    destination: RegisterIndex::R8,
+                    value: ShifterOperand::Register(RegisterIndex::R9),
+                },
+            },
+        ),
+    ];
     for (encoded, decoded) in input {
         assert_eq!(Instruction::decode_arm(encoded), Ok(decoded))
     }
