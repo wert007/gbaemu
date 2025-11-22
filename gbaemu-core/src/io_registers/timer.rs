@@ -45,7 +45,7 @@ impl MemoryPlugin for Timer {
 
     fn read_byte(&self, address: usize) -> u8 {
         if (0x4000110..0x4000120).contains(&address) {
-            unreachable!("Unused!")
+            return 0;
         }
         let relative_address = address & !0x4000100;
         let index = relative_address / 4;

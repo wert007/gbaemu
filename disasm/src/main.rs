@@ -13,7 +13,7 @@ fn main() {
         bios,
     ) {
         println!(
-            "{addr:x}:\t{} (0x{:x})",
+            "{addr:04x}:\t{} (0x{:x})",
             p.display(DisplayOptions {
                 reg_names: RegNames {
                     av_registers: false,

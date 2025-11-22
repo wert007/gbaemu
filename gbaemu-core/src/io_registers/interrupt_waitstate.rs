@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::{fmt::Debug, time::Instant};
 
 use crate::{interrupts::Interrupt, memory::MemoryPlugin};
 
@@ -28,14 +28,27 @@ pub struct InterruptWaitstate {
     ///4000800h  4    R/W  ?         Undocumented - Internal Memory Control (R/W)
     ///4xx0800h  4    R/W  ?         Mirrors of 4000800h (repeated each 64K)
     internal_memory_control: u32,
+
+    interrupt_last_firing_time: [usize; Interrupt::COUNT],
 }
 
 impl InterruptWaitstate {
-    pub(crate) fn should_raise_interrupt(&self, interrupt: Interrupt) -> bool {
+    pub(crate) fn should_raise_interrupt(&mut self, interrupt: Interrupt, tick: usize) -> bool {
         if self.interrupt_master_enable & 1 == 0 {
             return false;
         }
-        (self.interrupt_enable & (1 << interrupt.to_bit_index())) > 0
+        let should_fire = (self.interrupt_enable & (1 << interrupt.to_bit_index())) > 0;
+        should_fire && self.can_fire_again(interrupt, tick)
+    }
+
+    fn can_fire_again(&mut self, interrupt: Interrupt, tick: usize) -> bool {
+        let last_time = self.interrupt_last_firing_time[interrupt.to_bit_index() as usize];
+        if last_time + interrupt.min_fire_cooldown() < tick {
+            self.interrupt_last_firing_time[interrupt.to_bit_index() as usize] = tick;
+            true
+        } else {
+            false
+        }
     }
 }
 
@@ -92,7 +105,12 @@ impl MemoryPlugin for InterruptWaitstate {
             0x204..0x206 => {
                 read_byte_from_half_word(self.game_pak_waitstate, relative_address - 0x204)
             }
+            0x206..0x208 | 0x20a..0x300 | 0x410 => 0,
+            0x208..0x20A => {
+                read_byte_from_half_word(self.interrupt_master_enable, relative_address - 0x208)
+            }
             0x300 => self.post_boot_flag,
+            0x301 => self.power_down_control,
             _ => todo!("Interrupt read_byte at {address:x}"),
         }
     }

@@ -1,5 +1,8 @@
 use super::write_byte_to_half_word;
-use crate::{io_registers::write_byte_to_word, memory::MemoryPlugin};
+use crate::{
+    io_registers::{read_byte_from_half_word, write_byte_to_word},
+    memory::MemoryPlugin,
+};
 
 #[derive(Debug, Default)]
 pub struct Dma {
@@ -25,10 +28,10 @@ impl MemoryPlugin for Dma {
 
     fn read_byte(&self, address: usize) -> u8 {
         if (0x40000e0..0x4000100).contains(&address) {
-            unreachable!("Unused!")
+            0
+        } else {
+            self.channels[Self::address_to_index(address)].read_byte(address)
         }
-
-        self.channels[Self::address_to_index(address)].read_byte(address)
     }
 
     fn write_byte(&mut self, address: usize, byte: u8) {
@@ -64,8 +67,13 @@ impl MemoryPlugin for DmaChannel {
         (0x40000B0..0x4000100).contains(&address)
     }
 
-    fn read_byte(&self, _address: usize) -> u8 {
-        todo!()
+    fn read_byte(&self, address: usize) -> u8 {
+        let address = Self::normalize_address(address) & !0x4000000;
+        match address {
+            0xb0..0xba => 0,
+            0xBA..0xBC => read_byte_from_half_word(self.control, address - 0xBA),
+            _ => todo!("{address:x}"),
+        }
     }
 
     fn write_byte(&mut self, address: usize, byte: u8) {

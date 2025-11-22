@@ -17,6 +17,9 @@ impl MemoryPlugin for KeypadInput {
         let relative_address = address & !0x4000000;
         match relative_address {
             0x130..0x132 => read_byte_from_half_word(self.status, relative_address - 0x130),
+            0x132..0x134 => {
+                read_byte_from_half_word(self.interrupt_control, relative_address - 0x132)
+            }
             _ => unreachable!("Implement read for {relative_address:x}"),
         }
     }

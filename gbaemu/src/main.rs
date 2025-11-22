@@ -1,8 +1,9 @@
 use clap::Parser;
 use gbaemu_core::{
+    io_registers::GbaIo,
     lcd::PixelFormat,
-    plugins::Debugger,
-    registers::{RegisterIndex, RegisterList},
+    plugins::debugger::Debugger,
+    registers::{RegisterIndex, RegisterList, Registers},
     Cartridge, Gba, GbaArgs,
 };
 use image::Rgba;
@@ -10,9 +11,20 @@ use minifb::WindowOptions;
 use std::{
     fs::File,
     io::BufReader,
+    path::PathBuf,
     sync::{atomic::AtomicBool, Arc, Mutex},
     thread,
+    time::Duration,
 };
+
+fn parse_hex_u32(s: &str) -> Result<u32, String> {
+    let Some(s) = s.strip_prefix("0x") else {
+        return s
+            .parse()
+            .map_err(|e| format!("invalid integer, use prefix 0x for hex!: {e}"));
+    };
+    u32::from_str_radix(s, 16).map_err(|e| format!("invalid hex: {e}"))
+}
 
 #[derive(Parser, Debug, Clone)]
 struct GbaEmuArgs {
@@ -28,12 +40,16 @@ struct GbaEmuArgs {
     show_palette: bool,
     #[clap(long, short = 't', default_value = "false")]
     show_tilemaps: bool,
+    #[clap(long="log", default_value=None)]
+    log_file: Option<PathBuf>,
+    #[clap(long, default_value=None, num_args = 2, value_parser = parse_hex_u32)]
+    watch_memoryblock: Option<Vec<u32>>,
 }
 
 impl Into<GbaArgs> for GbaEmuArgs {
     fn into(self) -> GbaArgs {
         GbaArgs {
-            silent: self.silent,
+            log_file: self.log_file,
             watch_stack: self.stack,
             watch_registers: RegisterList::from_registers(
                 self.watch
@@ -46,6 +62,7 @@ impl Into<GbaArgs> for GbaEmuArgs {
 
 fn main() {
     let args = GbaEmuArgs::parse();
+    dbg!(&args);
     let game = Cartridge::new(BufReader::new(File::open("./assets/2048_jam.gba").unwrap()));
     // let game = Cartridge::new(BufReader::new(File::open("./assets/2048_jam.gba").unwrap()));
     // gba.dump_bios();
@@ -67,10 +84,48 @@ fn main() {
         )
     };
     let mut gba = Gba::new(game).with_args(args.clone());
-    let debugger = Debugger::new();
-    // debugger
-    // .with_breakpoint(0x3b4)
-    // .with_watch_stack();
+    let mut debugger = Debugger::new(args.silent);
+    debugger
+    // .with_breakpoint(0xab0)
+    // .with_breakpoint(0xaac)
+    // .with_breakpoint(0x440)
+    // .with_breakpoint_conditionally(0xbc8, |r: Registers| r.read(RegisterIndex::R1) == 0x6016c00)
+    // .with_breakpoint(0x198e)
+    // .with_breakpoint(0x1992)
+    // .with_breakpoint(0x1998)
+    // .with_breakpoint(0x199e)
+    // .with_breakpoint(0x19a8)
+    // .with_breakpoint(0x19b2)
+    // .with_breakpoint(0x2b6a)
+    // .with_breakpoint(0x2c4c)
+    // .with_breakpoint(0x330)
+    // // .with_breakpoint(0xb96)
+    // .with_watch_memory_address(0x3007FF8, 2)
+    // .with_watch_memory_address(0x3fffFF8, 2)
+    .with_watch_stack()
+    // .with_watch_memory_address(0x60024e0, 0x20)
+    // .with_watch_memory_address(0x6002440, 0x80000)
+
+    // This means we need to support V-CounterFlag (is there an Interrupt as well?)
+    // .with_watch_memory_address(0x06010000 + 8 * 8 * 434, 8 * 8)
+    .with_watch_memory_address(0x06010000 + 2176, 1)
+    // .with_watch_memory_address(0x4000134, 2)
+    // .with_watch_memory_address(0x400012a, 2)
+    // .with_watch_memory_address(0x4000120, 8)
+    // .with_watch_memory_address(0x4000128, 1)
+    // .with_watch_memory_address(0x400012a, 2)
+    // .with_watch_memory_address(0x4000200, 2)
+    // .with_watch_memory_address(0x4000202, 2)
+    // .with_watch_memory_address(0x4000208, 2)
+    // .with_watch_memory_address(0x4000068, 2)
+    // .with_watch_memory_address(0x400006c, 2)
+    // .with_watch_memory_address(0x4000070, 6)
+    // .with_watch_memory_address(0x4000078, 2)
+    // .with_watch_memory_address(0x4000080, 6)
+    // .with_watch_memory_address(0x4000088, 2)
+    // .with_watch_memory_address(0x4000090, 16)
+    // .with_watch_memory_address(0x40000a0, 8)
+    ;
     gba.with_plugin(debugger);
     let gba = Arc::new(Mutex::new(gba));
     let is_running = Arc::new(AtomicBool::new(true));
@@ -78,13 +133,11 @@ fn main() {
         let gba = gba.clone();
         let is_running = is_running.clone();
         thread::spawn(move || {
-            'thread: while is_running.load(std::sync::atomic::Ordering::Relaxed) {
-                for _ in 0..100 {
-                    if !gba.lock().unwrap().run_cycle() && false {
-                        break 'thread;
-                    }
+            while is_running.load(std::sync::atomic::Ordering::Relaxed) {
+                for _ in 0..1000 {
+                    gba.lock().unwrap().run_cycle();
                 }
-                // std::thread::sleep(Duration::from_nanos(1));
+                std::thread::sleep(Duration::from_nanos(1));
             }
             is_running.store(false, std::sync::atomic::Ordering::Relaxed);
         })
@@ -145,6 +198,7 @@ fn main() {
             if !args.show_tilemaps {
                 return;
             }
+            let gba = gba.lock().unwrap().clone_gba_io();
             // const SCALE: usize = 16;
             let mut window = minifb::Window::new(
                 "Tilemaps",
@@ -166,8 +220,41 @@ fn main() {
                 } else {
                     buffer
                 };
-                make_screenshot(&buffer, 32 * 8, 32 * 8, Some("tileset".into()));
+                if window.is_key_down(minifb::Key::F5) {
+                    make_screenshot(&buffer, 32 * 8, 32 * 8, Some("tileset".into()));
+                }
+                // buffer[4096 + 16] = 0xff8888;
                 window.update_with_buffer(&buffer, 32 * 8, 32 * 8).unwrap();
+            }
+        })
+    };
+    let memory_window = {
+        let gba = gba.clone();
+        let is_running = is_running.clone();
+        thread::spawn(move || {
+            const WIDTH: usize = 900;
+            const HEIGHT: usize = 600;
+            let Some([at, length]) = &args.watch_memoryblock.as_deref() else {
+                return;
+            };
+            // const SCALE: usize = 16;
+            let mut window = minifb::Window::new(
+                "Memory",
+                WIDTH,
+                HEIGHT,
+                WindowOptions {
+                    scale: minifb::Scale::X1,
+                    // scale: minifb::Scale::X16,
+                    // topmost: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+            let mut buffer = vec![0; WIDTH * HEIGHT];
+            while window.is_open() && is_running.load(std::sync::atomic::Ordering::Relaxed) {
+                write_memory_into_buffer::<WIDTH, HEIGHT>(&mut buffer, *at, *length, &gba);
+                window.update_with_buffer(&buffer, WIDTH, HEIGHT).unwrap();
             }
         })
     };
@@ -184,13 +271,41 @@ fn main() {
     }
     _ = palette_window.join();
     _ = tilemap_window.join();
+    _ = memory_window.join();
     _ = core.join();
     gba.lock().unwrap().swap_buffers(&mut buffer);
     make_screenshot(&buffer, 240, 160, None);
 }
 
-fn load_tile_data(
+fn write_memory_into_buffer<const WIDTH: usize, const HEIGHT: usize>(
+    buf: &mut Vec<u32>,
+    at: u32,
+    length: u32,
     gba: &Arc<Mutex<Gba>>,
+) {
+    let text = gba
+        .lock()
+        .unwrap()
+        .read_memory(at, length)
+        .into_iter()
+        // .map(|b| format!("{b:#02x}"))
+        .enumerate()
+        .fold(String::new(), |acc, (i, cur)| {
+            if i == 0 {
+                format!("{cur:#04x}")
+            } else if i % 8 != 0 {
+                format!("{acc} {cur:#04x}")
+            } else if i % 32 != 0 {
+                format!("{acc}  {cur:#04x}")
+            } else {
+                format!("{acc}\n{cur:#04x}")
+            }
+        });
+    minifb_fonts::font5x8::new_renderer(WIDTH, HEIGHT, 0xffffffff).draw_text(buf, 2, 2, &text);
+}
+
+fn load_tile_data(
+    gba: &Arc<Mutex<GbaIo>>,
     use_palette: Option<usize>,
     format: PixelFormat,
 ) -> Vec<u32> {
@@ -239,6 +354,13 @@ fn load_tile_data(
             let x = base_x + pixel_x;
             let y = base_y + pixel_y;
             let buffer_index = y * 32 * 8 + x;
+            if buffer_index >= buffer.len() {
+                break;
+            }
+            // if buffer_index == 4096 + 16 {
+            //     dbg!(x, y, tile_index, base_x, base_y, pixel_x, pixel_y);
+            //     panic!();
+            // }
             buffer[buffer_index] = color;
         }
     }

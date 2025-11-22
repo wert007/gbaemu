@@ -291,6 +291,11 @@ impl RegisterList {
         self.0.count_ones()
     }
 
+    pub fn with(mut self, register: RegisterIndex) -> Self {
+        self.0 |= 1 << register as usize;
+        self
+    }
+
     #[allow(dead_code)]
     pub fn from_registers(registers: impl IntoIterator<Item = RegisterIndex>) -> RegisterList {
         let mut raw = 0;

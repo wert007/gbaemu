@@ -282,6 +282,84 @@ fn test_instruction_decoding() -> Result<(), InstructionDecodeError> {
                 },
             },
         ),
+        (
+            0xb530,
+            Instruction {
+                condition: Condition::Always,
+                op: InstructionOp::StoreOrLoadRegisters {
+                    is_load: false,
+                    register_base: RegisterIndex::Sp,
+                    register_base_write_back: true,
+                    register_list: RegisterList::default()
+                        .with(RegisterIndex::R4)
+                        .with(RegisterIndex::R5)
+                        .with(RegisterIndex::Lr),
+                    addressing_mode: StoreLoadManyAddressingMode::DecrementBefore,
+                },
+            },
+        ),
+        // (
+        //     0xbd30,
+        //     Instruction {
+        //         condition: Condition::Always,
+        //         op: InstructionOp::StoreOrLoadRegisters {
+        //             is_load: true,
+        //             register_base: RegisterIndex::Sp,
+        //             register_base_write_back: true,
+        //             register_list: RegisterList::default()
+        //                 .with(RegisterIndex::R4)
+        //                 .with(RegisterIndex::R5)
+        //                 .with(RegisterIndex::Lr),
+        //             addressing_mode: StoreLoadManyAddressingMode::IncrementAfter,
+        //         },
+        //     },
+        // ),
+        (
+            0x2862,
+            Instruction {
+                condition: Condition::Always,
+                op: InstructionOp::ShifterOperandInstruction {
+                    op: ShifterOperandInstructionOp::Compare,
+                    update_flags: true,
+                    base: RegisterIndex::R0,
+                    destination: RegisterIndex::R0,
+                    value: ShifterOperand::Immediate(0x62, None),
+                },
+            },
+        ),
+        (
+            0x8121,
+            Instruction {
+                condition: Condition::Always,
+                op: InstructionOp::StoreOrLoadRegister {
+                    is_load: false,
+                    address: StoreLoadMemoryAddress {
+                        ignore_bit_1_of_pc: false,
+                        register_base: RegisterIndex::R4,
+                        write_back: false,
+                        negate_offset: false,
+                        offset: ShifterOperand::Immediate(8, None),
+                        is_post_indexing: false,
+                    },
+                    // Is weird but not dangerous i think!
+                    register_destination: RegisterIndex::R1,
+                    read_size: StoreLoadMemorySize::Halfword,
+                },
+            },
+        ),
+        (
+            0xa255,
+            Instruction {
+                condition: Condition::Always,
+                op: InstructionOp::ShifterOperandInstruction {
+                    op: ShifterOperandInstructionOp::Add,
+                    update_flags: false,
+                    base: RegisterIndex::Ip,
+                    destination: RegisterIndex::R2,
+                    value: ShifterOperand::Immediate(0x154, None),
+                },
+            },
+        ),
     ];
     for (encoded, decoded) in thumbs {
         let result = Instruction::decode_thumb(encoded, 0)?;
@@ -447,4 +525,85 @@ fn test_msr() {
         let actual = state.registers.read(RegisterIndex::Cpsr);
         assert_eq!(actual, cpsr, "actual: {actual:x}, expected: {cpsr:x}");
     }
+}
+
+#[test]
+fn test_adr_instruction() {
+    const DUMMY_CARTRIGDE: Cartridge = Cartridge { raw: Vec::new() };
+    let mut state = Gba::new(DUMMY_CARTRIGDE);
+    let instruction = Instruction::decode_thumb(0xa255, 0).unwrap();
+    state.registers.cpsr_mut().set_is_thumb(true);
+    state.registers.write(RegisterIndex::Ip, 0x2c4e);
+    instruction.execute(&mut state);
+    assert_eq!(state.registers.read(RegisterIndex::R2), 0x2DA4);
+}
+
+#[test]
+fn test_stm_instruction() {
+    const DUMMY_CARTRIGDE: Cartridge = Cartridge { raw: Vec::new() };
+    let mut state = Gba::new(DUMMY_CARTRIGDE);
+    let instruction = Instruction::decode_arm(0xb8a103fc).unwrap();
+    state.registers.cpsr_mut().set_is_thumb(false);
+    state.registers.update_nz_flags(u32::MAX);
+    state.registers.write(RegisterIndex::R1, 0x03000000);
+    let words = [
+        0xffffffffu32,
+        0xffffffffu32,
+        0xffffffffu32,
+        0xffffffffu32,
+        0xffffffffu32,
+        0xffffffffu32,
+        0xffffffffu32,
+        0xffffffffu32,
+        0xffffffffu32,
+        0xeeeeeeeeu32,
+        0xddddddddu32,
+        0xccccccccu32,
+        0xbbbbbbbbu32,
+        0xaaaaaaaau32,
+        0x99999999u32,
+        0x88888888u32,
+        0x77777777,
+        0x66666666,
+        0x55555555,
+        0x44444444,
+        0x33333333,
+        0x22222222,
+        0x11111111,
+        0,
+        0xf0f0f0f0,
+    ];
+
+    let registers = [
+        RegisterIndex::R2,
+        RegisterIndex::R3,
+        RegisterIndex::R4,
+        RegisterIndex::R5,
+        RegisterIndex::R6,
+        RegisterIndex::R7,
+        RegisterIndex::R8,
+        RegisterIndex::R9,
+    ];
+    for words in words.chunks(8) {
+        for register in registers {
+            state.registers.write(register, 0);
+        }
+        for (word, register) in words.iter().zip(registers) {
+            state.registers.write(register, *word);
+        }
+        assert!(instruction.condition.can_execute(state.registers.flags()));
+        // state.registers.write(RegisterIndex::Ip, 0x2c4e);
+        instruction.clone().execute(&mut state);
+    }
+    for (offset, word) in words.iter().enumerate() {
+        let actual = state
+            .memory
+            .read_word_silent(0x03000000 + offset as u32 * 4);
+        assert_eq!(
+            actual, *word,
+            "actual = {actual:#x}, expected = {:#x}, at: {offset}",
+            *word
+        );
+    }
+    assert_eq!(state.registers.read(RegisterIndex::R1), 50331776);
 }

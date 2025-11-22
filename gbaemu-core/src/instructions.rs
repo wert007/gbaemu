@@ -7,8 +7,8 @@ use std::fmt::{Debug, Display};
 use thiserror::Error;
 
 use crate::{
-    registers::{RegisterIndex, RegisterList, Registers},
     Gba,
+    registers::{RegisterIndex, RegisterList, Registers},
 };
 
 mod decode;
@@ -173,6 +173,18 @@ impl Instruction {
             ctx,
         }
     }
+
+    // This is very handwavey for now. compare with
+    // https://problemkaputt.de/gbatek.htm#armcpuinstructioncycletimes and
+    // https://mgba.io/2015/06/27/cycle-counting-prefetch/ for more details.
+    pub(crate) fn tick_duration(&self, flags: InstructionFlags) -> usize {
+        self.op.tick_duration()
+            + if self.condition.can_execute(flags) {
+                0
+            } else {
+                1
+            }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -214,6 +226,13 @@ impl BranchTarget {
     //         }
     //     }
     // }
+
+    pub fn register(&self) -> Option<RegisterIndex> {
+        match self {
+            BranchTarget::Offset(_) => None,
+            BranchTarget::RegisterWithOffset(register_index, _) => Some(*register_index),
+        }
+    }
 
     pub fn display(&self, ctx: DisplayContext) -> DisplayedBranchTarget {
         DisplayedBranchTarget { target: *self, ctx }
@@ -609,6 +628,7 @@ impl InstructionOp {
                             state.memory.write_byte_to(address_raw, value as u8)
                         }
                         StoreLoadMemorySize::Halfword => {
+                            // eprintln!("{address_raw:#x}: {value:#x} as u16 = {:#x}", value as u16);
                             state.memory.write_half_word_to(address_raw, value as u16)
                         }
                         StoreLoadMemorySize::Word => state.memory.write_word_to(address_raw, value),
@@ -747,6 +767,87 @@ impl InstructionOp {
             op: *self,
             condition,
             ctx,
+        }
+    }
+
+    /// ALU              1S          +1S+1N if R15 loaded, +1I if SHIFT(Rs)
+    /// SWP              1S+2N+1I
+    /// SWI,trap         2S+1N
+    /// MUL              1S+ml
+
+    /// MSR,MRS          1S
+    /// LDR              1S+1N+1I    +1S+1N if R15 loaded
+    /// STR              2N
+    /// LDM              nS+1N+1I    +1S+1N if R15 loaded
+    /// STM              (n-1)S+2N
+    /// BL (THUMB)       3S+1N
+    /// B,BL             2S+1N
+    /// {cond} false     1S
+    fn tick_duration(&self) -> usize {
+        match self {
+            InstructionOp::Branch {
+                store_return_address_in_link_register,
+                instruction_size,
+                ..
+            } => {
+                if *store_return_address_in_link_register && *instruction_size == 2 {
+                    4
+                } else {
+                    3
+                }
+            }
+            InstructionOp::StoreOrLoadRegister {
+                is_load, address, ..
+            } => {
+                if *is_load {
+                    3 + if address.register_base == RegisterIndex::Ip {
+                        2
+                    } else {
+                        0
+                    }
+                } else {
+                    2
+                }
+            }
+            InstructionOp::StoreOrLoadRegisters {
+                is_load,
+                register_list,
+                ..
+            } => {
+                if *is_load {
+                    register_list.len() as usize * 1
+                        + 2
+                        + if register_list.contains(RegisterIndex::Ip) {
+                            2
+                        } else {
+                            0
+                        }
+                } else {
+                    (register_list.len() as usize - 1) * 1 + 2
+                }
+            }
+            InstructionOp::Mrs { .. } => 1,
+            InstructionOp::Msr { .. } => 1,
+            InstructionOp::ShifterOperandInstruction { op, .. } => match op {
+                ShifterOperandInstructionOp::Move => 1,
+                ShifterOperandInstructionOp::Compare => 1,
+                ShifterOperandInstructionOp::CompareNegative => 1,
+                ShifterOperandInstructionOp::And => 1,
+                ShifterOperandInstructionOp::InclusiveOr => 1,
+                ShifterOperandInstructionOp::ExclusiveOr => 1,
+                ShifterOperandInstructionOp::Add => 1,
+                ShifterOperandInstructionOp::AddWithCarry => 1,
+                ShifterOperandInstructionOp::Subtract => 1,
+                ShifterOperandInstructionOp::Multiplicate => {
+                    1 + // TODO: read actual values to determine duration!
+                    0
+                }
+                ShifterOperandInstructionOp::ReverseSubtract => 1,
+                ShifterOperandInstructionOp::TestEquals => 1,
+                ShifterOperandInstructionOp::Test => 1,
+                ShifterOperandInstructionOp::MoveNegate => 1,
+                ShifterOperandInstructionOp::BitClear => 1,
+            },
         }
     }
 }

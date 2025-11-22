@@ -1,11 +1,11 @@
 use std::{
     io::{IsTerminal, Read},
+    path::PathBuf,
     sync::{Arc, Mutex},
 };
 
-use colorable::*;
-use instructions::{display::DisplayContext, Instruction, InstructionDecodeError};
-use io_registers::{lcd::Lcd, GbaIo};
+use instructions::{Instruction, InstructionDecodeError, display::DisplayContext};
+use io_registers::{GbaIo, lcd::Lcd};
 use memory::{Memory, MemoryPlugin, SimpleMemory};
 use registers::{Mode, RegisterIndex, RegisterList, Registers};
 
@@ -14,7 +14,7 @@ use crate::{io_registers::lcd::PixelFormat, plugins::Plugin};
 mod bitmod;
 mod instructions;
 mod interrupts;
-mod io_registers;
+pub mod io_registers;
 pub mod memory;
 pub mod plugins;
 pub mod registers;
@@ -65,8 +65,9 @@ impl MemoryPlugin for Cartridge {
 
 #[derive(Debug, Default, Clone)]
 pub struct GbaArgs {
-    pub silent: bool,
+    // pub silent: bool,
     pub watch_stack: bool,
+    pub log_file: Option<PathBuf>,
     pub watch_registers: RegisterList,
 }
 
@@ -104,10 +105,12 @@ pub struct Gba {
     registers: Registers,
     args: GbaArgs,
     ticks: usize,
+    wait_ticks: usize,
     gba_io: Arc<Mutex<GbaIo>>,
     vram: Arc<Mutex<SimpleMemory>>,
     flag: bool,
     plugins: Vec<Box<dyn Plugin>>,
+    disable_interrupts_since_nothing_is_being_executed: bool,
 }
 
 impl Gba {
@@ -136,37 +139,60 @@ impl Gba {
             registers: Registers::new(),
             args: Default::default(),
             ticks: 0,
+            wait_ticks: 0,
             gba_io,
             vram,
             flag: false,
             plugins: Vec::new(),
+            disable_interrupts_since_nothing_is_being_executed: false,
         }
     }
 
-    pub fn with_plugin(&mut self, plugin: impl Plugin + 'static) -> &mut Self {
+    pub fn read_memory(&self, at: u32, length: u32) -> Vec<u8> {
+        self.memory.read_vec(at, length)
+    }
+
+    pub fn with_plugin(&mut self, mut plugin: impl Plugin + 'static) -> &mut Self {
+        plugin.with_args(self.args.clone());
         self.plugins.push(Box::new(plugin));
         self
     }
 
-    pub fn run_cycle(&mut self) -> bool {
+    pub fn run_cycle(&mut self) {
+        while self.wait_ticks > 0 {
+            self.ticks += 1;
+            self.wait_ticks -= 1;
+            return;
+        }
         self.ticks += 1;
         let registers = self.registers;
         let interrupts = self.gba_io.lock().unwrap().run_cycle(self.ticks);
         for interrupt in interrupts {
             self.raise_interrupt(interrupt);
         }
+
         let mode = self.registers.cpsr().mode();
         let ip = self.registers.read_raw(RegisterIndex::Ip);
         let instruction = self.fetch().unwrap_or_else(|e| {
             // dbg!(self);
             panic!("Invalid Instruction at {ip}., {e}")
         });
+        self.wait_ticks += instruction.tick_duration(self.registers.flags());
         // println!("pc: 0x{ip:08x}");
-        for plugin in &mut self.plugins {
-            if !plugin.should_execute(&registers, mode, &instruction, ip) {
-                return true;
-            }
+        let plugin_wishes = self
+            .plugins
+            .iter_mut()
+            .map(|p| p.should_execute(&registers, mode, &instruction, ip, &self.memory))
+            .fold(plugins::PluginWishes::default(), |acc, cur| {
+                acc.combined_with(cur)
+            });
+        if plugin_wishes.pause_execution() {
+            self.ticks -= 1;
+            self.wait_ticks -= instruction.tick_duration(self.registers.flags());
+            self.disable_interrupts_since_nothing_is_being_executed = !false;
+            return;
         }
+        self.disable_interrupts_since_nothing_is_being_executed = !true;
 
         let increment = if instruction.increments_instruction_pointer(self) {
             0
@@ -175,91 +201,17 @@ impl Gba {
         } else {
             4
         };
-        const VERBOSE: bool = true;
-        if !self.args.silent {
-            // let valued_instruction = instruction.fill_values(self);
-            if true || instruction.condition.can_execute(self.registers.flags()) {
-                print!(
-                    "0x{ip:x}:\t{}",
-                    instruction.display(DisplayContext {
-                        highlighted_registers: self.args.watch_registers,
-                        is_tty: std::io::stdout().is_terminal(),
-                        register_values: self.registers,
-                        use_register_values: false,
-                    })
-                );
-            }
-            if VERBOSE {
-                println!("\tFLAGS: {}", registers.flags(),);
-                println!(
-                    "0x{ip:x}:\t{}\tIS_THUMB: {} MODE: {:?}",
-                    instruction.display(DisplayContext {
-                        highlighted_registers: self.args.watch_registers,
-                        is_tty: std::io::stdout().is_terminal(),
-                        register_values: self.registers,
-                        use_register_values: true,
-                    }),
-                    if registers.cpsr().is_thumb() {
-                        "yes"
-                    } else {
-                        "no"
-                    },
-                    registers.cpsr().mode(),
-                );
-            } else {
-                println!();
-            }
-        }
         instruction.execute(self);
         if !instruction.increments_instruction_pointer(self) {
             self.registers.write(RegisterIndex::Ip, ip + increment);
         }
 
         for plugin in &mut self.plugins {
-            plugin.after_executing(&self.registers, mode, &instruction, ip);
+            plugin.after_executing(&self.registers, mode, &instruction, ip, &mut self.memory);
         }
-
-        if !self.args.silent && VERBOSE {
-            print!("  ");
-            if self.registers.cpsr().mode() != mode {
-                print!("{:?}\t", self.registers.cpsr().mode());
-            }
-            for register in registers.diff(self.registers) {
-                if self.args.watch_registers.into_iter().any(|r| r == register) {
-                    if std::io::stdout().is_terminal() {
-                        print!(
-                            "> {}: {:08x}\t",
-                            register.cyan(),
-                            self.registers.read(register)
-                        );
-                    } else {
-                        print!("> {register}: {:08x}\t", self.registers.read(register));
-                    }
-                } else {
-                    print!("{register}: {:08x}\t", self.registers.read(register));
-                }
-            }
-            println!();
-        } else {
-            let mut did_print = false;
-            for register in registers.diff(self.registers) {
-                if self.args.watch_registers.into_iter().any(|r| r == register) {
-                    print!("{register}: {:08x}\t", self.registers.read(register));
-                    did_print = true;
-                }
-            }
-            if did_print {
-                println!();
-            }
-        }
-
-        if self.ticks % 10000 == 0 {
-            // let _a = dbg!(self.gba_io.lock().unwrap());
-        }
-        ip < 0x8000000
     }
 
-    fn fetch(&self) -> Result<Instruction, InstructionDecodeError> {
+    fn fetch(&mut self) -> Result<Instruction, InstructionDecodeError> {
         let ip = self.registers.read_raw(RegisterIndex::Ip);
         if self.registers.cpsr().is_thumb() {
             let ip = ip & !1;
@@ -301,6 +253,10 @@ impl Gba {
         self
     }
 
+    pub fn clone_gba_io(&self) -> Arc<Mutex<GbaIo>> {
+        self.gba_io.clone()
+    }
+
     pub fn swap_buffers(&self, buffer: &mut [u32; 160 * 240]) {
         self.gba_io.lock().unwrap().lcd.swap_buffers(buffer)
     }
@@ -314,13 +270,15 @@ impl Gba {
     }
 
     fn raise_interrupt(&mut self, interrupt: interrupts::Interrupt) {
-        if !self
-            .gba_io
-            .lock()
-            .unwrap()
-            .interrupt
-            .should_raise_interrupt(interrupt)
+        if self.disable_interrupts_since_nothing_is_being_executed
+            || !self
+                .gba_io
+                .lock()
+                .unwrap()
+                .interrupt
+                .should_raise_interrupt(interrupt, self.ticks)
         {
+            // dbg!("Ignored interrupt", interrupt);
             return;
         }
         let psr = self.registers.read(RegisterIndex::Cpsr);

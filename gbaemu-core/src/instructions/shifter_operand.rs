@@ -1,13 +1,13 @@
 use std::fmt::Display;
 
 use crate::{
-    registers::{RegisterIndex, Registers},
     Gba,
+    registers::{RegisterIndex, Registers},
 };
 
 use super::{
-    display::{DisplayContext, DisplayedShifterOperand},
     InstructionDecodeError,
+    display::{DisplayContext, DisplayedShifterOperand},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,6 +106,11 @@ impl ShifterOperandInstructionOp {
             }
             ShifterOperandInstructionOp::Add => {
                 let lhs = state.registers.read(base) as i32;
+                let lhs = if base == RegisterIndex::Ip {
+                    lhs & !3
+                } else {
+                    lhs
+                };
                 let result_with_overflow_flag = lhs.overflowing_add(value as i32);
                 state
                     .registers
@@ -252,6 +257,16 @@ impl ShifterOperandInstructionOp {
     }
 }
 
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_shift() {
+        assert_eq!(ShiftOperator::RightShift.execute(1, 1, false), (0, true));
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShiftOperator {
     LeftShift,
@@ -280,11 +295,7 @@ impl ShiftOperator {
             }
             Self::ArithmeticRightShift => {
                 if rhs == 0 {
-                    if (lhs as i32) < 0 {
-                        u32::MAX
-                    } else {
-                        0
-                    }
+                    if (lhs as i32) < 0 { u32::MAX } else { 0 }
                 } else {
                     (lhs as i32).wrapping_shr(rhs) as u32
                 }

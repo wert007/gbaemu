@@ -248,7 +248,17 @@ impl Obj {
         };
 
         let index = match pixel_format {
-            PixelFormat::Bpp4 => todo!(),
+            PixelFormat::Bpp4 => {
+                // vram.read_byte((0x6010000
+                //     + self.tile_number() * tile_size
+                //     // + 1 * tile_size
+                //     // + 1 * tile_size * 16
+                //     + tile_offset_y * tile_size * 16
+                //     + tile_pixel_offset_y * 8
+                //     + tile_offset_x * tile_size
+                //     + tile_pixel_offset_x) as usize)
+                1
+            }
             PixelFormat::Bpp8 => vram.read_byte(
                 (0x6010000
                     + self.tile_number() * tile_size

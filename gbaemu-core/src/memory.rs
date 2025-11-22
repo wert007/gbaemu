@@ -1,4 +1,5 @@
 use std::{
+    collections::VecDeque,
     ptr,
     sync::{Arc, Mutex},
 };
@@ -85,9 +86,16 @@ enum MemoryProtection {
     BiosOnly,
 }
 
+#[derive(Debug, Default)]
+pub struct MemoryWatcher {
+    pub reads: VecDeque<(u32, u8)>,
+    pub writes: VecDeque<(u32, u8, u8)>,
+}
+
 pub struct Memory {
     raw: Vec<u8>,
     pub plugins: Vec<Box<dyn MemoryPlugin + Send>>,
+    pub memory_watcher: MemoryWatcher,
     // Used for memory protection!
     ip: u32,
 }
@@ -105,6 +113,7 @@ impl Memory {
             raw,
             ip: 0,
             plugins: Vec::new(),
+            memory_watcher: Default::default(),
         }
     }
 
@@ -122,7 +131,7 @@ impl Memory {
         &self.raw[sp as usize..0x03007FFF]
     }
 
-    pub fn read_word(&self, address: u32) -> u32 {
+    pub fn read_word(&mut self, address: u32) -> u32 {
         assert_eq!(address % 4, 0);
         let address = address as usize;
         let address = self
@@ -139,12 +148,34 @@ impl Memory {
                     self.raw[address + 3],
                 ])
             });
-        self.log_all::<true>(address as _, value);
+        for (i, b) in value.to_le_bytes().into_iter().enumerate() {
+            self.log_all::<true>((address + i) as u32, b, b);
+        }
+
+        value
+    }
+    pub fn read_word_silent(&self, address: u32) -> u32 {
+        assert_eq!(address % 4, 0);
+        let address = address as usize;
+        let address = self
+            .handle_mirrors(address)
+            .expect("Implement memory protection");
+        let value = self
+            .get_plugin_for(address)
+            .map(|p| p.read_word(address))
+            .unwrap_or_else(|| {
+                u32::from_le_bytes([
+                    self.raw[address],
+                    self.raw[address + 1],
+                    self.raw[address + 2],
+                    self.raw[address + 3],
+                ])
+            });
 
         value
     }
 
-    pub fn read_half_word_at(&self, address: u32) -> u16 {
+    pub fn read_half_word_at(&mut self, address: u32) -> u16 {
         assert_eq!(address % 2, 0);
         let address = address as usize;
         let address = self
@@ -154,11 +185,26 @@ impl Memory {
             .get_plugin_for(address)
             .map(|p| p.read_half_word(address))
             .unwrap_or_else(|| u16::from_le_bytes([self.raw[address], self.raw[address + 1]]));
-        self.log_all::<true>(address as _, value as _);
+        for (i, b) in value.to_le_bytes().into_iter().enumerate() {
+            self.log_all::<true>((address + i) as u32, b, b);
+        }
         value
     }
 
-    pub(crate) fn read_byte_at(&self, address: u32) -> u8 {
+    pub fn read_half_word_at_silent(&self, address: u32) -> u16 {
+        assert_eq!(address % 2, 0);
+        let address = address as usize;
+        let address = self
+            .handle_mirrors(address)
+            .expect("Implement memory protection");
+        let value = self
+            .get_plugin_for(address)
+            .map(|p| p.read_half_word(address))
+            .unwrap_or_else(|| u16::from_le_bytes([self.raw[address], self.raw[address + 1]]));
+        value
+    }
+
+    pub(crate) fn read_byte_at(&mut self, address: u32) -> u8 {
         let address = address as usize;
         let address = self
             .handle_mirrors(address)
@@ -167,7 +213,20 @@ impl Memory {
             .get_plugin_for(address)
             .map(|p| p.read_byte(address))
             .unwrap_or_else(|| self.raw[address]);
-        self.log_all::<true>(address as _, value as _);
+        self.log_all::<true>(address as _, value, value);
+
+        value
+    }
+
+    pub(crate) fn read_byte_at_silent(&self, address: u32) -> u8 {
+        let address = address as usize;
+        let address = self
+            .handle_mirrors(address)
+            .expect("Implement memory protection");
+        let value = self
+            .get_plugin_for(address)
+            .map(|p| p.read_byte(address))
+            .unwrap_or_else(|| self.raw[address]);
 
         value
     }
@@ -181,7 +240,24 @@ impl Memory {
         let address = self
             .handle_mirrors(address)
             .expect("Implement memory protection");
-        self.log_all::<false>(address, word);
+        let old_value = self
+            .get_plugin_for(address)
+            .map(|p| p.read_word(address))
+            .unwrap_or(u32::from_le_bytes([
+                self.raw[address],
+                self.raw[address + 1],
+                self.raw[address + 2],
+                self.raw[address + 3],
+            ]));
+
+        for (i, (c, n)) in old_value
+            .to_le_bytes()
+            .into_iter()
+            .zip(word.to_le_bytes())
+            .enumerate()
+        {
+            self.log_all::<false>((address + i) as u32, n, c);
+        }
         self.get_plugin_for_mut(address)
             .map(|p| p.write_word(address, word))
             .unwrap_or_else(|| {
@@ -201,7 +277,22 @@ impl Memory {
         let address = self
             .handle_mirrors(address)
             .expect("Implement memory protection");
-        self.log_all::<false>(address, half_word as _);
+        let old_value = self
+            .get_plugin_for(address)
+            .map(|p| p.read_half_word(address))
+            .unwrap_or(u16::from_le_bytes([
+                self.raw[address],
+                self.raw[address + 1],
+            ]));
+
+        for (i, (c, n)) in old_value
+            .to_le_bytes()
+            .into_iter()
+            .zip(half_word.to_le_bytes())
+            .enumerate()
+        {
+            self.log_all::<false>((address + i) as u32, n, c);
+        }
         self.get_plugin_for_mut(address)
             .map(|p| p.write_half_word(address, half_word))
             .unwrap_or_else(|| {
@@ -220,7 +311,11 @@ impl Memory {
         let address = self
             .handle_mirrors(address)
             .expect("Implement memory protection");
-        self.log_all::<false>(address, byte as _);
+        let old_value = self
+            .get_plugin_for(address)
+            .map(|p| p.read_byte(address))
+            .unwrap_or(self.raw[address]);
+        self.log_all::<false>(address as u32, byte, old_value);
         self.get_plugin_for_mut(address)
             .map(|p| p.write_byte(address, byte))
             .unwrap_or_else(|| {
@@ -252,7 +347,7 @@ impl Memory {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn dump(&self) {
+    pub(crate) fn dump(&mut self) {
         let not_used_ranges = [
             0x00004000..=0x01FFFFFF,
             0x02040000..=0x02FFFFFF,
@@ -278,19 +373,13 @@ impl Memory {
         }
     }
 
-    fn log_all<const IS_READING: bool>(&self, address: usize, value: u32) {
-        let is_interesting = |address| {
-            // BIOS
-            !((0x00000000..=0x00003FFF).contains(&address) && IS_READING)
-            // STACK
-                && !(0x03000000..=0x03007FFF).contains(&address)
-        };
-        if is_interesting(address) && false {
-            if IS_READING {
-                println!("reading 0x{value:x} from 0x{address:x}");
-            } else {
-                println!("writing 0x{value:x} to 0x{address:x}");
-            }
+    fn log_all<const IS_READING: bool>(&mut self, address: u32, value: u8, old_value: u8) {
+        if IS_READING {
+            self.memory_watcher.reads.push_back((address, value));
+        } else {
+            self.memory_watcher
+                .writes
+                .push_back((address, old_value, value));
         }
     }
 
@@ -357,5 +446,15 @@ impl Memory {
             }
         }
         Ok(address)
+    }
+
+    pub(crate) fn read_vec(&self, mut at: u32, mut length: u32) -> Vec<u8> {
+        let mut result = Vec::with_capacity(length as _);
+        while length > 0 {
+            result.push(self.read_byte_at_silent(at));
+            at += 1;
+            length -= 1;
+        }
+        result
     }
 }

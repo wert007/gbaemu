@@ -3,7 +3,6 @@ use std::fmt::Debug;
 use super::*;
 use crate::memory::MemoryPlugin;
 
-#[derive(Default)]
 pub struct SerialCommunication {
     data: [u16; 4],
     control_register: u16,
@@ -13,6 +12,21 @@ pub struct SerialCommunication {
     bus_receive_data: u32,
     bus_transmit_data: u32,
     bus_receive_status: u16,
+}
+
+impl Default for SerialCommunication {
+    fn default() -> Self {
+        Self {
+            data: [0xffff; 4],
+            control_register: Default::default(),
+            data_2: 0xffff,
+            mode_select_general_purpose: Default::default(),
+            bus_control: Default::default(),
+            bus_receive_data: Default::default(),
+            bus_transmit_data: Default::default(),
+            bus_receive_status: Default::default(),
+        }
+    }
 }
 impl SerialCommunication {
     fn read_data(&self, relative_address: usize) -> u8 {
@@ -73,7 +87,20 @@ impl MemoryPlugin for SerialCommunication {
                 read_byte_from_half_word(self.control_register, relative_address - 0x128)
             }
             0x12a..0x12c => self.read_data(relative_address - 0x120),
-
+            0x134..0x136 => {
+                // todo!("Where are we?");
+                read_byte_from_half_word(self.mode_select_general_purpose, relative_address - 0x134)
+            }
+            0x12c..0x130 => 0,
+            0x138..0x140 => 0,
+            0x140..0x142 => read_byte_from_half_word(self.bus_control, relative_address - 0x140),
+            0x142..0x150 => 0,
+            0x150..0x154 => read_byte_from_word(self.bus_receive_data, relative_address - 0x150),
+            0x154..0x158 => read_byte_from_word(self.bus_transmit_data, relative_address - 0x154),
+            0x158..0x15a => {
+                read_byte_from_half_word(self.bus_receive_status, relative_address - 0x158)
+            }
+            0x15a..0x200 => 0,
             _ => unreachable!("Implement read for {relative_address:x}"),
         }
     }
@@ -83,7 +110,10 @@ impl MemoryPlugin for SerialCommunication {
         match relative_address {
             0x120..0x128 => self.write_data(relative_address - 0x120, byte),
             0x128..0x12a => {
-                write_byte_to_half_word(&mut self.control_register, relative_address - 0x128, byte)
+                write_byte_to_half_word(&mut self.control_register, relative_address - 0x128, byte);
+                if self.control_register & 0x40 > 0 {
+                    todo!("IRQ expected??")
+                }
             }
             0x12a..0x12c => self.write_data(relative_address - 0x120, byte),
             0x12c..0x130 => {}

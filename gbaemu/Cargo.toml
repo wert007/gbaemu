@@ -11,3 +11,4 @@ gbaemu-core = { version = "0.1.0", path = "../gbaemu-core" }
 colorable = "0.1.4"
 minifb = "0.27.0"
 image = "0.25.5"
+minifb_fonts = "0.1.3"

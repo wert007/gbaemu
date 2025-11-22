@@ -6,7 +6,7 @@ use serial_communication::SerialCommunication;
 use sound::Sound;
 use timer::Timer;
 
-use crate::{interrupts::Interrupt, memory::MemoryPlugin};
+use crate::{interrupts::Interrupt, lcd::PixelFormat, memory::MemoryPlugin};
 
 pub mod dma;
 pub mod interrupt_waitstate;
@@ -38,6 +38,14 @@ impl GbaIo {
             keypad: Default::default(),
             interrupt: Default::default(),
         }
+    }
+
+    pub fn load_tiles(&self, format: PixelFormat) -> Vec<Vec<u8>> {
+        self.lcd.load_tiles(format)
+    }
+
+    pub fn load_palette(&self) -> Vec<u32> {
+        self.lcd.load_palette()
     }
 
     pub fn run_cycle(&mut self, tick: usize) -> Vec<Interrupt> {
@@ -115,6 +123,16 @@ fn read_byte_from_half_word(source: u16, byte_index: usize) -> u8 {
         0 => source & 0x00ff,
         1 => (source & 0xff00) >> 8,
         _ => unreachable!("byte_index must be below 2!"),
+    }) as u8
+}
+
+fn read_byte_from_word(source: u32, byte_index: usize) -> u8 {
+    (match byte_index {
+        0 => source & 0x00ff,
+        1 => (source & 0xff00) >> 8,
+        2 => (source & 0xff0000) >> 16,
+        3 => (source & 0xff000000) >> 24,
+        _ => unreachable!("byte_index must be below 4!"),
     }) as u8
 }
 

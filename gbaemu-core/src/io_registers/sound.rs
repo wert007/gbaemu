@@ -61,10 +61,79 @@ impl MemoryPlugin for Sound {
     fn read_byte(&self, address: usize) -> u8 {
         let relative_address = address & !0x4000000;
         match relative_address {
+            0x60..0x62 => {
+                read_byte_from_half_word(self.channel_1_sweep_register, relative_address - 0x60)
+            }
+            0x62..0x64 => read_byte_from_half_word(
+                self.channel_1_duty_length_envelope,
+                relative_address - 0x62,
+            ),
+            0x64..0x66 => {
+                read_byte_from_half_word(self.channel_1_frequency_control, relative_address - 0x64)
+            }
+            0x66..0x68 => {
+                todo!()
+            }
+            0x68..0x6a => read_byte_from_half_word(
+                self.channel_2_duty_length_envelope,
+                relative_address - 0x68,
+            ),
+            0x6a..0x6c => {
+                todo!()
+            }
+            0x6C..0x6E => {
+                read_byte_from_half_word(self.channel_2_frequency_control, relative_address - 0x6C)
+            }
+            0x6e..0x70 => {
+                todo!()
+            }
+            0x70..0x72 => read_byte_from_half_word(
+                self.channel_3_stop_wave_ram_select,
+                relative_address - 0x70,
+            ),
+            0x72..0x74 => {
+                read_byte_from_half_word(self.channel_3_length_volume, relative_address - 0x72)
+            }
+            0x74..0x76 => {
+                read_byte_from_half_word(self.channel_3_frequency_control, relative_address - 0x74)
+            }
+            0x76..0x78 => {
+                todo!()
+            }
+
+            0x78..0x7a => {
+                read_byte_from_half_word(self.channel_4_length_envelope, relative_address - 0x78)
+            }
+            0x7a..0x7c => {
+                todo!()
+            }
+
+            0x7c..0x7e => {
+                read_byte_from_half_word(self.channel_4_frequency_control, relative_address - 0x7c)
+            }
+            0x7e..0x80 => {
+                todo!()
+            }
+
+            0x80..0x82 => read_byte_from_half_word(
+                self.control_stereo_volumne_enable,
+                relative_address - 0x80,
+            ),
+            0x82..0x84 => {
+                read_byte_from_half_word(self.control_mixing_dma, relative_address - 0x82)
+            }
+            0x84..0x86 => {
+                read_byte_from_half_word(self.control_sound_on_off, relative_address - 0x84)
+            }
+
             0x88..0x8a => read_byte_from_half_word(self.sound_pwm_control, relative_address - 0x88),
             0x90..0xa0 => self
                 .inactive_channel_3_wave_pattern()
                 .read_byte(relative_address - 0x90),
+            0xa0..0xa4 => read_byte_from_word(self.channel_a_fifo, relative_address - 0xa0),
+            0xa4..0xa8 => read_byte_from_word(self.channel_b_fifo, relative_address - 0xa4),
+            0xa8..0xb0 => 0,
+
             _ => todo!("reading from {address:x}"),
         }
     }

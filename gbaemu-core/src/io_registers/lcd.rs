@@ -24,7 +24,9 @@ mod tests {
         let values: Vec<u16> = vert_lines(150, 10).into_iter().collect();
         assert_eq!(
             values,
-            &[150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+            &[
+                150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
+            ]
         );
     }
 }
@@ -528,7 +530,7 @@ impl Lcd {
 
     pub(crate) fn load_tiles(&self, format: PixelFormat) -> Vec<Vec<u8>> {
         let vram = self.vram.lock().unwrap();
-        let bytes = &vram.as_bytes()[0x10000..];
+        let bytes = &vram.as_bytes()[0x00000..];
         match format {
             PixelFormat::Bpp4 => {
                 bytes
@@ -553,7 +555,12 @@ impl Lcd {
             .as_bytes()
             .chunks_exact(8)
             .map(|b| Obj::from_obj_ram(b))
-            .filter(|o| o.is_enabled() && o.size().is_some())
+            .enumerate()
+            .filter(|(_, o)| o.is_enabled() && o.size().is_some())
+            // .inspect(|(u, o)| {
+            //     dbg!(u, o);
+            // })
+            .map(|(_, o)| o)
             .collect()
     }
 }
@@ -620,7 +627,33 @@ impl MemoryPlugin for LcdMemoryInterface {
         match relative_address {
             0x00..0x02 => read_byte_from_half_word(self.display_control, relative_address),
             0x02..0x04 => read_byte_from_half_word(self.green_swap, relative_address - 0x02),
+            0x04..0x06 => read_byte_from_half_word(self.display_stat, relative_address - 0x4),
             0x06..0x08 => read_byte_from_half_word(self.vertical_count, relative_address - 0x06),
+            0x8..0xa => {
+                read_byte_from_half_word(self.background_control[0].0, relative_address - 0x8)
+            }
+            0xa..0xc => {
+                read_byte_from_half_word(self.background_control[1].0, relative_address - 0xa)
+            }
+            0xc..0xe => {
+                read_byte_from_half_word(self.background_control[2].0, relative_address - 0xc)
+            }
+            0xe..0x10 => {
+                read_byte_from_half_word(self.background_control[3].0, relative_address - 0xe)
+            }
+            0x10..0x48 | 0x4c..0x50 | 0x54..0x60 => 0,
+            0x48..0x4a => {
+                read_byte_from_half_word(self.inside_window_0_and_1, relative_address - 0x48)
+            }
+            0x4a..0x4c => read_byte_from_half_word(
+                self.inside_window_obj_and_outside_windows,
+                relative_address - 0x4a,
+            ),
+            0x50..0x52 => {
+                read_byte_from_half_word(self.color_special_effects, relative_address - 0x50)
+            }
+            0x52..0x54 => read_byte_from_half_word(self.alpha_blending, relative_address - 0x52),
+
             _ => todo!("reading from {address:0x}"),
         }
     }
