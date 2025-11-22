@@ -4,3 +4,6 @@ assets/gba_bios.bin
 assets
 screenshots
 references
+.vscode
+out*
+bios.c
