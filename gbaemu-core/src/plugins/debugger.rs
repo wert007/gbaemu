@@ -11,6 +11,8 @@ use crate::{
 pub struct Breakpoint {
     pub ip: u32,
     condition: Option<Box<dyn Fn(Registers) -> bool + Send>>,
+    /// Breakpoint will cease to exist, once it been hit.
+    fragile: bool,
 }
 impl Breakpoint {
     fn condition_met(&self, registers: Registers) -> bool {
@@ -72,6 +74,7 @@ impl Debugger {
         self.breakpoints.push(Breakpoint {
             ip,
             condition: None,
+            fragile: false,
         });
         self
     }
@@ -84,6 +87,7 @@ impl Debugger {
         self.breakpoints.push(Breakpoint {
             ip,
             condition: Some(Box::new(c)),
+            fragile: false,
         });
         self
     }
@@ -327,6 +331,8 @@ impl Plugin for Debugger {
         if should_continue {
             return PluginWishes::default();
         }
+        // self.stackframe.pop_if(|s| s == ip);
+        self.breakpoints.retain(|b| b.ip != ip || !b.fragile);
         let mut line = String::new();
         println!("Press [c] to continue");
         std::io::stdin().read_line(&mut line).unwrap();
@@ -334,6 +340,19 @@ impl Plugin for Debugger {
         match line.to_lowercase().trim() {
             "r" => {
                 registers.dump();
+            }
+            "j" => {
+                if let Some(target) = self.stackframe.iter().copied().filter(|t| *t != ip).last() {
+                    self.breakpoints.push(Breakpoint {
+                        ip: target,
+                        condition: None,
+                        fragile: true,
+                    });
+                    self.is_stepping = false;
+                    pause_execution = false;
+                } else {
+                    println!("Stackframe is empty. No function to jump to.")
+                }
             }
             "cb" => {
                 self.print_stack_frame(ip);
