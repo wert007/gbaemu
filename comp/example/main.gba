@@ -1,0 +1,389 @@
+const a = 2;
+const b = 5;
+const c = a + b;
+const d = true;
+const f = [1, 2, 3, 4];
+
+comp fn g(): u32 {
+    12
+}
+
+const h = g();
+
+const character = load_png_as_bytes_with_palette<32, 32>("player.png").compressed();
+
+// fn setup() {
+//
+// }
+//
+// #[handler(onVblank, priority=1)]
+// fn on_vblank() {
+//
+// }
+//
+// #[handler(always, priority=0)]
+// fn loop() {
+//
+// }
+
+#[intrinsic]
+pub fn forget<T>(t: &T) {}
+
+struct Sprite<width: u8, height: u8> {
+    bytes: [u8; width * height / 2],
+    palette: [Color; 16],
+}
+
+struct CompressedSprite<width: u8, height: u8, compressed: u16> {
+    bytes: [u8; compressed],
+    palette: [Color; 16],
+}
+
+impl Sprite<width: u8, height: u8> {
+    comp fn compressed(this): CompressedSprite<width, height, compressed_length> {
+        const bytes = compress(this.bytes);
+        compressed_length = bytes.len();
+        CompressedSprite {
+            bytes,
+            palette: this.palette,
+        }
+    }
+}
+
+struct Color {
+    raw: u32,
+}
+
+comp fn compress<uncompressed_length: u16>(bytes: [u8; uncompressed_length]): [u8; compressed_length] {
+    compressed_length = 1;
+    [0]
+}
+
+comp struct DynVec<T> {
+    buffer: dynptr,
+    length: u32,
+    capacity: u32,
+}
+
+comp struct Path {
+    inner: DynVec<u8>,
+}
+
+comp struct File {
+    path: Path;
+}
+
+impl !Drop for File;
+
+impl File {
+    #[intrinsic,panics]
+    comp fn open(path: Path): File {}
+    #[intrinsic,panics]
+    comp fn close(this) {}
+}
+
+comp struct PngReader {
+    file: File,
+}
+
+impl !Drop for PngReader;
+
+impl PngReader {
+    #[intrinsic, panics]
+    comp fn open(file: File): PngReader {}
+
+    #[intrinsic]
+    comp fn width(&this): u32 {}
+
+    #[intrinsic]
+    comp fn height(&this): u32 {}
+
+    #[intrinsic, panics]
+    comp fn pixel(&this): Vec<Color, width * height> {
+        width = this.width();
+        height = this.height();
+    }
+
+    #[panics]
+    comp fn close(this) {
+        this.file.close();
+    }
+}
+
+enum Option<T> {
+    Some(T),
+    None,
+}
+
+impl<T> Option<T> {
+    pub fn map<U>(this, f: Fn<(T), U>): Option<U> {
+        Some(f.call(this?))
+    }
+}
+
+struct Array<T, len: u16> {
+    raw: ptr,
+}
+
+impl<T, len: u16> Array<T, len> {
+    unsafe fn from_ptr(raw: ptr) -> Array<T, len: u16> {
+        Array {
+            raw
+        }
+    }
+
+    fn len(&this) -> u16 {
+        Array::len
+    }
+
+    fn contains(&this, t: T) -> bool {
+        this.to_iter().any(|e| e == t)
+    }
+}
+
+impl<T: Drop, len: u16> Drop for Array<T, len> {
+    fn drop(&mut this) {
+        for element in this {
+            element.drop();
+        }
+    }
+}
+
+struct Enumerate<T, I: Iterator<T>> {
+    inner: I,
+    index: u16,
+}
+
+impl<T, I: Iterator<T>> Iterator<(u16, T)> for Enumerate<T, I> {
+    fn next(&mut this) -> Option<T> {
+        this.inner.next().map(|t| {
+            let index = this.index;
+            this.index += 1;
+            (index, t)
+        })
+    }
+
+}
+
+trait Fn<Input, Output> {
+    fn call(this, args: Input): Output;
+}
+
+trait DynFn<Input, Output> {
+    dyn fn call(this, args: Input): Output;
+}
+
+trait Into<T> {
+    fn into(this): T;
+}
+
+fn iterator_any_impl(iter: I, predicate: Fn<T, bool>) -> bool {
+    for value in this {
+        if predicate.call(value) {
+            return true;
+        }
+    }
+    return false;
+}
+
+trait Iterator<T> {
+    fn next(&mut this) -> Option<T>;
+    fn any(this, predicate: Fn<(T),bool>) -> bool {
+        iterator_any_impl(this, predicate)
+    }
+    dyn fn any(this, predicate: DynFn<(T),bool>) -> bool {
+        iterator_any_impl(this, predicate)
+    }
+    fn enumerate(this) -> Enumerate<This> {
+        Enumerate {
+            inner: this,
+            index: 0,
+        }
+    }
+}
+
+struct SliceLikeIterator<T> {
+    buffer: ptr,
+    index: u16,
+    length: u16,
+}
+
+impl<T> Iterator<T> for SliceLikeIterator<T> {
+    fn next(&mut this) -> Option<T> {
+        if this.index >= this.length {
+            None
+        } else {
+            let element = this.buffer.offset_by(this.index * T::size()).byte_cast<T*>;
+            this.index += 1;
+            Some(element.deref)
+        }
+    }
+}
+
+impl<T, len: u16> Index<u16>, IndexMut<u16>, Drop, IntoIterator for Array<T, len> {
+    fn to_iter(this) -> SliceLikeIterator<T> {
+        forget(&this);
+        SliceLikeIterator {
+            buffer: this.raw,
+            index: 0,
+            length: Array::len,
+        }
+    }
+
+    fn drop(&mut this) {
+        for element in this {
+            element.drop();
+        }
+    }
+
+    #[panics]
+    fn read(&this, index: u16) -> &T {
+        assert(index < len, "Index out of bounds");
+        unsafe {
+            this.raw.offset_by(index * T::size()).byte_cast<T*>.byte_cast<&T>
+        }
+    }
+
+    #[panics]
+    fn read_mut(&mut this, index: u16) -> &mut T {
+        assert(index < len, "Index out of bounds");
+        unsafe {
+            this.raw.offset_by(index * T::size()).byte_cast<T*>.byte_cast<&mut T>
+        }
+    }
+}
+
+#[linear_type]
+enum BinaryResult {
+    Success,
+    Error,
+}
+
+impl BinaryResult {
+    pub fn assert_success(this, msg: DebugString) {
+        match this {
+            Success => (),
+            Error => {
+                panic(msg)
+            }
+        }
+    }
+
+    pub fn is_success(this): bool {
+        match this {
+            Success => true,
+            Error => false,
+        }
+    }
+}
+
+
+struct Vec<T, capacity: u16> {
+    buffer: [u8; T],
+    len: u16,
+}
+
+impl<T, capacity: u16> Vec<T, capacity> {
+    fn new() -> Vec<T, capacity> {
+        Vec {
+            buffer: unsafe { --- },
+            len: 0,
+        }
+    }
+
+    fn try_push(&mut this, element: T): BinaryResult {
+        if this.len < this.capacity {
+            this.buffer[this.len] = element;
+            this.len += 1;
+            BinaryResult::Success
+        } else {
+            BinaryResult::Error
+        }
+    }
+
+    #[panics]
+    fn push(&mut this, element: T) {
+        this.try_push(element).assert_success("No space left in Vector, could not push element!");
+    }
+
+
+    const pub fn last_mut(&mut this): &mut T {
+        #[no_panics]
+        this.buffer[this.len - 1].mut
+    }
+
+    #[panics]
+    const pub fn pop(&mut this): T {
+        assert(this.len > 0);
+        this.len -= 1;
+        unsafe {
+            let element: T = ---;
+            raw_copy(this.buffer[this.len - 1].mut, element.mut)
+            element
+        }
+    }
+
+    const pub fn contains(&this, needle: &T): bool {
+        this.to_iter().any(|e| e == needle)
+    }
+
+    const pub fn find_index(&this, needle: &T): Option<u16> {
+        this.to_iter().enumerate().find(|e| e.1 == needle).map(|e| e.0)
+    }
+
+    const pub fn to_array<length: u16 = capacity>(this): Option<[T; length]> {
+        if this.len == Vec::to_array::length {
+            Some(this.buffer)
+        } else if this.len > Vec::to_array::length {
+            unsafe {
+                Some(Array::from_ptr(this.buffer.as_ptr()))
+            }
+        } else {
+            None
+        }
+    }
+}
+
+impl<T: Copy, capacity: u16> Vec<T, capacity> {
+    const pub fn fill(&mut this, fill: T) {
+        while this.try_push(fill).is_success() {}
+    }
+}
+
+impl<T: Drop, capacity: u16> Drop for Vec<T, capacity> {
+    fn drop(&mut this) {
+        while this.len > 0 {
+            let element = this.pop()!;
+        }
+    }
+}
+
+#[panics]
+comp fn load_png_as_bytes_with_palette<width: u8, height: u8>(path: &Path): Sprite<width, height> {
+    assert(
+        width == 8 && [8, 16].contains(height)
+        || width == 16 && [8, 16, 32].contains(height)
+        || width == 32 && [8, 16, 32, 64].contains(height)
+        || width == 64 && [32, 64].contains(height),
+        f"Invalid width and height combination: {width}x{height}");
+    let file = File::open(path);
+    let png = PngReader::open(file);
+    let palette = Vec::<Color, 16>::new();
+    let bytes = Vec::<u8, width * height / 2>::new();
+    for i, pixel in png.pixel() {
+        if !palette.contains(pixel) {
+            palette.try_push(pixel).or_panic("Image can contain at most 16 colors in this mode!");
+        }
+        let index = palette.find_index(pixel)!.cast<u8>!;
+        if i % 2 == 0 {
+            bytes.push(index)!;
+        } else {
+            bytes.last_mut()! |= index << 4;
+        }
+    }
+    png.close();
+    Sprite {
+        palette: palette.fill(Color::BLACK).to_array()!,
+        bytes: bytes.to_array().or_panic("Image contained not enough pixels for the given size!"),
+    }
+}
