@@ -1,13 +1,23 @@
+use crate::bind::BoundId;
+
 #[derive(Debug, Clone)]
 pub enum Value {
-    Integer(i64),
+    UnsignedInteger32(u32),
     Bool(bool),
     Array(Vec<Value>),
+    CompileTimeFunction(BoundId),
 }
 impl Value {
-    pub(crate) fn as_int(&self) -> Option<i64> {
+    pub(crate) fn as_u32(&self) -> Option<u32> {
         match self {
-            Value::Integer(i) => Some(*i),
+            Value::UnsignedInteger32(i) => Some(*i),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn as_bound_id(&self) -> Option<BoundId> {
+        match self {
+            Value::CompileTimeFunction(i) => Some(*i),
             _ => None,
         }
     }

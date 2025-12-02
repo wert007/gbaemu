@@ -1,7 +1,7 @@
 use std::{ops::Index, path::Path};
 
 use crate::{
-    bind::Binder,
+    bind::{Binder, BoundTree},
     lexer::{Lexer, Token},
     parser::Parser,
     syntax_tree::{Bound, Parsed, SyntaxTree},
@@ -63,8 +63,8 @@ impl Compiler {
         Parser::new(file).parse(self)
     }
 
-    pub fn bind(&mut self, file: SourceTextId) -> SyntaxTree<Bound> {
-        Binder::new(file).bind(self)
+    pub fn bind(&mut self, file: SourceTextId) -> BoundTree {
+        Binder::new(file, self).bind(self)
     }
 
     pub fn intern(&mut self, string: impl Into<String>) -> StringId {
@@ -170,6 +170,13 @@ impl Location {
                 result = result.combine(l.location());
             }
             Some(result)
+        }
+    }
+
+    unsafe fn zero() -> Location {
+        Location {
+            span: Span { start: 0, len: 0 },
+            file: SourceTextId(0),
         }
     }
 }

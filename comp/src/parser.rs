@@ -3,7 +3,9 @@ use std::collections::VecDeque;
 use crate::{
     Compiler, HasLocation, SourceTextId,
     lexer::{Lexer, Token, TokenKind},
-    syntax_tree::{Parsed, SyntaxNode, SyntaxTree},
+    syntax_tree::{
+        FunctionHeaderNode, ParameterNode, Parsed, SyntaxNode, SyntaxTree, TypeIdentifier,
+    },
 };
 
 pub struct Parser {
@@ -35,12 +37,12 @@ impl Parser {
         }
     }
 
-    fn parse_until(
+    fn parse_until<U>(
         &mut self,
         end: TokenKind,
         compiler: &mut Compiler,
-        body: impl Fn(&mut Parser, &mut Compiler) -> SyntaxNode<Parsed>,
-    ) -> Vec<SyntaxNode<Parsed>> {
+        body: impl Fn(&mut Parser, &mut Compiler) -> U,
+    ) -> Vec<U> {
         let mut result = Vec::new();
         self.expected.push(end);
         while self.peek(0, compiler) != end && self.peek(0, compiler) != TokenKind::Eof {
@@ -93,6 +95,9 @@ impl Parser {
     fn parse_top_level_statement(&mut self, compiler: &mut Compiler) -> SyntaxNode<Parsed> {
         match self.peek(0, compiler) {
             TokenKind::ConstKeyword => self.parse_const_declaration(compiler),
+            TokenKind::CompKeyword | TokenKind::FnKeyword => {
+                self.parse_function_declaration(compiler)
+            }
             _ => todo!("Error handling!"),
         }
     }
@@ -122,7 +127,8 @@ impl Parser {
         minimal_precedence: usize,
         compiler: &mut Compiler,
     ) -> SyntaxNode<Parsed> {
-        let mut expression = self.parse_expression_atom(compiler);
+        let expression = self.parse_expression_atom(compiler);
+        let mut expression = self.parse_function_call(expression, compiler);
         while let Some((lhs, rhs)) = self.peek(0, compiler).binary_precedence() {
             if lhs < minimal_precedence {
                 break;
@@ -164,11 +170,7 @@ impl Parser {
         let lbracket = self.expect(TokenKind::LBracket, compiler);
         let entries = self.parse_until(TokenKind::RBracket, compiler, |p, c| {
             let expression = p.parse_expression(c);
-            let comma = if p.peek(0, c) == TokenKind::Comma {
-                Some(p.consume(c))
-            } else {
-                None
-            };
+            let comma = p.maybe_expect(TokenKind::Comma, c);
             SyntaxNode::<Parsed>::commaed_expression(expression, comma)
         });
         assert!(
@@ -179,5 +181,109 @@ impl Parser {
         );
         let rbracket = self.expect(TokenKind::RBracket, compiler);
         SyntaxNode::<Parsed>::array_literal(lbracket, entries, rbracket)
+    }
+
+    fn parse_function_declaration(&mut self, compiler: &mut Compiler) -> SyntaxNode<Parsed> {
+        let comp_keyword = self.maybe_expect(TokenKind::CompKeyword, compiler);
+        let fn_keyword = self.expect(TokenKind::FnKeyword, compiler);
+        let name = self.expect(TokenKind::Identifier, compiler);
+        let function_header = self.parse_function_header(compiler);
+        let body = self.parse_block_expression(compiler);
+        SyntaxNode::<Parsed>::function_declaration(
+            comp_keyword,
+            fn_keyword,
+            name,
+            function_header,
+            body,
+        )
+    }
+
+    fn maybe_expect(&mut self, comma: TokenKind, compiler: &mut Compiler) -> Option<Token> {
+        if self.peek(0, compiler) == comma {
+            Some(self.consume(compiler))
+        } else {
+            None
+        }
+    }
+
+    fn parse_function_header(&mut self, compiler: &mut Compiler) -> FunctionHeaderNode<Parsed> {
+        let lparen = self.expect(TokenKind::LParen, compiler);
+        let parameters = self.parse_until(TokenKind::RParen, compiler, |p, c| p.parse_parameter(c));
+        let rparen = self.expect(TokenKind::RParen, compiler);
+        assert!(
+            parameters.is_empty()
+                || parameters[..parameters.len() - 1]
+                    .iter()
+                    .all(|e| e.ends_with_comma()),
+            "TODO: Error handling"
+        );
+        let return_type = if self.peek(0, compiler) == TokenKind::Colon {
+            let colon = self.expect(TokenKind::Colon, compiler);
+            let type_identifier = self.parse_type_identifier(compiler);
+            Some((colon, type_identifier))
+        } else {
+            None
+        };
+        FunctionHeaderNode::<Parsed>::new(lparen, parameters, rparen, return_type)
+    }
+
+    fn parse_parameter(&mut self, compiler: &mut Compiler) -> ParameterNode<Parsed> {
+        let identifier = self.expect(TokenKind::Identifier, compiler);
+        let colon = self.expect(TokenKind::Colon, compiler);
+        let type_identifier = self.parse_type_identifier(compiler);
+        let comma = self.maybe_expect(TokenKind::Comma, compiler);
+        ParameterNode::<Parsed>::new(identifier, colon, type_identifier, comma)
+    }
+
+    fn parse_type_identifier(&mut self, compiler: &mut Compiler) -> TypeIdentifier {
+        let identifier = self.expect(TokenKind::Identifier, compiler);
+        TypeIdentifier { identifier }
+    }
+
+    fn parse_block_expression(&mut self, compiler: &mut Compiler) -> SyntaxNode<Parsed> {
+        let lbrace = self.expect(TokenKind::LBrace, compiler);
+        let body = self.parse_until(TokenKind::RBrace, compiler, |p, c| p.parse_statement(c));
+        // assert!(body[..body.len() - 1].iter().all(|))
+        let rbrace = self.expect(TokenKind::RBrace, compiler);
+        SyntaxNode::<Parsed>::block_expression(lbrace, body, rbrace)
+    }
+
+    fn parse_statement(&mut self, compiler: &mut Compiler) -> SyntaxNode<Parsed> {
+        match self.peek(0, compiler) {
+            _ => self.parse_expression_statement(compiler),
+        }
+    }
+
+    fn parse_expression_statement(&mut self, compiler: &mut Compiler) -> SyntaxNode<Parsed> {
+        let expression = self.parse_expression(compiler);
+        let semicolon = self.maybe_expect(TokenKind::Semicolon, compiler);
+        SyntaxNode::<Parsed>::expression_statement(expression, semicolon)
+    }
+
+    fn parse_function_call(
+        &mut self,
+        expression: SyntaxNode<Parsed>,
+        compiler: &mut Compiler,
+    ) -> SyntaxNode<Parsed> {
+        let mut base = expression;
+        while self.peek(0, compiler) == TokenKind::LParen {
+            let lparen = self.expect(TokenKind::LParen, compiler);
+            let arguments = self.parse_until(TokenKind::RParen, compiler, |p, c| {
+                let argument = p.parse_expression(c);
+                let comma = p.maybe_expect(TokenKind::Comma, c);
+                SyntaxNode::<Parsed>::commaed_expression(argument, comma)
+            });
+            assert!(
+                arguments.is_empty()
+                    || arguments[..arguments.len() - 1]
+                        .iter()
+                        .all(|e| e.kind.ends_with_comma()),
+                "TODO: Error handling"
+            );
+
+            let rparen = self.expect(TokenKind::RParen, compiler);
+            base = SyntaxNode::<Parsed>::function_call(base, lparen, arguments, rparen);
+        }
+        base
     }
 }

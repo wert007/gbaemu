@@ -4,3 +4,8 @@ const c = a + b;
 const d = true;
 const f = [1, 2, 3, 4];
 
+fn g(): u32 {
+    12
+}
+
+const h = g();

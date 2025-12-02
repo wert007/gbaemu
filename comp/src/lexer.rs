@@ -18,14 +18,19 @@ impl Token {
         let kind = match ch {
             '\0' => TokenKind::Eof,
             '=' => TokenKind::Equals,
+            ':' => TokenKind::Colon,
             ';' => TokenKind::Semicolon,
             '+' => TokenKind::Plus,
             '-' => TokenKind::Minus,
             '*' => TokenKind::Star,
             '/' => TokenKind::Slash,
             '%' => TokenKind::Percent,
+            '{' => TokenKind::LBrace,
+            '}' => TokenKind::RBrace,
             '[' => TokenKind::LBracket,
             ']' => TokenKind::RBracket,
+            '(' => TokenKind::LParen,
+            ')' => TokenKind::RParen,
             ',' => TokenKind::Comma,
             _ => TokenKind::Error,
         };
@@ -49,6 +54,8 @@ impl Token {
             "const" => TokenKind::ConstKeyword,
             "true" => TokenKind::TrueKeyword,
             "false" => TokenKind::FalseKeyword,
+            "comp" => TokenKind::CompKeyword,
+            "fn" => TokenKind::FnKeyword,
             _ => TokenKind::Identifier,
         };
         Self {
@@ -86,6 +93,13 @@ pub enum TokenKind {
     LBracket,
     RBracket,
     Comma,
+    Colon,
+    LParen,
+    RParen,
+    CompKeyword,
+    FnKeyword,
+    LBrace,
+    RBrace,
 }
 impl TokenKind {
     pub(crate) fn binary_precedence(&self) -> Option<(usize, usize)> {

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Index};
 
 use crate::{
     Compiler, HasLocation, Location, SourceTextId, StringId, const_evaluator,
@@ -8,6 +8,59 @@ use crate::{
     typing::{Type, TypeId, Types},
     value::Value,
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BoundId(usize);
+
+#[derive(Debug)]
+
+pub struct BoundTree {
+    // root: BoundId,
+    elements: Vec<SyntaxNode<Bound>>,
+    reserved: usize,
+}
+impl BoundTree {
+    fn new() -> Self {
+        Self {
+            elements: Vec::new(),
+            reserved: 0,
+        }
+    }
+
+    pub(crate) fn constant_value(&self, expression: BoundId) -> Option<&Value> {
+        self[expression].stage.constant_value.as_ref()
+    }
+
+    pub(crate) fn set_constant_value(&mut self, expression: BoundId, value: Option<Value>) {
+        self.elements[expression.0].stage.constant_value = value;
+    }
+
+    unsafe fn set(&mut self, id: BoundId, node: SyntaxNode<Bound>) {
+        assert!(id.0 < self.elements.len() + self.reserved);
+        self.reserved -= 1;
+        while self.elements.len() <= id.0 {
+            self.elements.push(SyntaxNode::<Bound>::error(
+                unsafe { Location::zero() },
+                BoundId(0),
+            ));
+        }
+        self.elements[id.0] = node;
+    }
+
+    unsafe fn prepare_id(&mut self) -> BoundId {
+        let id = self.elements.len() + self.reserved;
+        self.reserved += 1;
+        BoundId(id)
+    }
+}
+
+impl Index<BoundId> for BoundTree {
+    type Output = SyntaxNode<Bound>;
+
+    fn index(&self, index: BoundId) -> &Self::Output {
+        &self.elements[index.0]
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BoundBinaryOperator {
@@ -57,6 +110,15 @@ impl Variables {
     fn find_by_name(&self, name: StringId) -> Option<&VariableDeclaration> {
         self.variables.iter().find(|v| v.name == name)
     }
+
+    fn start_scope(&mut self) {
+        self.scopes.push(self.variables.len());
+    }
+
+    fn end_scope(&mut self) {
+        let Some(end) = self.scopes.pop() else { return };
+        self.variables.drain(end..);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -68,22 +130,84 @@ pub struct Binder {
     types: Types,
     variables: Variables,
     constants: HashMap<VariableId, Value>,
+    nodes: BoundTree,
 }
 
 impl Binder {
-    pub fn new(file: SourceTextId) -> Binder {
+    pub fn new(file: SourceTextId, compiler: &mut Compiler) -> Binder {
         Self {
             file,
-            types: Types::new(),
+            types: Types::new(compiler),
             variables: Variables::new(),
             constants: HashMap::new(),
+            nodes: BoundTree::new(),
         }
     }
 
-    pub fn bind(&mut self, compiler: &mut Compiler) -> SyntaxTree<Bound> {
+    pub fn bind(mut self, compiler: &mut Compiler) -> BoundTree {
         let tree = Parser::new(self.file).parse(compiler);
         let node = self.bind_node(tree.node, TypeId::VOID, compiler);
-        SyntaxTree { node }
+        self.nodes
+    }
+
+    fn bind_node_with_id(
+        &mut self,
+        node: SyntaxNode<Parsed>,
+        expected: TypeId,
+        compiler: &mut Compiler,
+        id: BoundId,
+    ) -> BoundId {
+        let location = node.location();
+        let node = match node.kind {
+            SyntaxNodeKind::Error => {
+                dbg!();
+                SyntaxNode::error(node.location(), id)
+            }
+            SyntaxNodeKind::Program(program_node) => {
+                self.bind_program(program_node, expected, location, compiler, id)
+            }
+            SyntaxNodeKind::ConstDeclaration(const_declaration_node) => self
+                .bind_const_declaration(const_declaration_node, expected, location, compiler, id),
+            SyntaxNodeKind::Literal(token) => self.bind_literal(token, expected, compiler, id),
+            SyntaxNodeKind::Binary(binary_node) => {
+                self.bind_binary(location, binary_node, expected, compiler, id)
+            }
+            SyntaxNodeKind::Identifier(identifier) => {
+                self.bind_identifier(identifier, expected, compiler, id)
+            }
+            SyntaxNodeKind::CommaedExpression((e, _)) => {
+                return self.bind_node_with_id(*e, expected, compiler, id);
+            }
+            SyntaxNodeKind::ArrayLiteral(array_literal_node) => {
+                self.bind_array_literal(array_literal_node, expected, location, compiler, id)
+            }
+            SyntaxNodeKind::ExpressionStatement(expression_statement_node) => self
+                .bind_expression_statement(
+                    expression_statement_node,
+                    expected,
+                    location,
+                    compiler,
+                    id,
+                ),
+            SyntaxNodeKind::BlockExpression(block_expression_node) => {
+                self.bind_block_expression(block_expression_node, expected, location, compiler, id)
+            }
+            SyntaxNodeKind::FunctionDeclaration(function_declaration_node) => self
+                .bind_function_declaration(
+                    function_declaration_node,
+                    expected,
+                    location,
+                    compiler,
+                    id,
+                ),
+            SyntaxNodeKind::FunctionCall(function_call_node) => {
+                self.bind_function_call(function_call_node, expected, location, compiler, id)
+            }
+        };
+        unsafe {
+            self.nodes.set(id, node);
+        }
+        id
     }
 
     fn bind_node(
@@ -91,28 +215,9 @@ impl Binder {
         node: SyntaxNode<Parsed>,
         expected: TypeId,
         compiler: &mut Compiler,
-    ) -> SyntaxNode<Bound> {
-        let location = node.location();
-        match node.kind {
-            SyntaxNodeKind::Error => SyntaxNode::error(node.location()),
-            SyntaxNodeKind::Program(program_node) => {
-                self.bind_program(program_node, expected, location, compiler)
-            }
-            SyntaxNodeKind::ConstDeclaration(const_declaration_node) => {
-                self.bind_const_declaration(const_declaration_node, expected, location, compiler)
-            }
-            SyntaxNodeKind::Literal(token) => self.bind_literal(token, expected, compiler),
-            SyntaxNodeKind::Binary(binary_node) => {
-                self.bind_binary(binary_node, expected, compiler)
-            }
-            SyntaxNodeKind::Identifier(identifier) => {
-                self.bind_identifier(identifier, expected, compiler)
-            }
-            SyntaxNodeKind::CommaedExpression((e, _)) => self.bind_node(*e, expected, compiler),
-            SyntaxNodeKind::ArrayLiteral(array_literal_node) => {
-                self.bind_array_literal(array_literal_node, expected, location, compiler)
-            }
-        }
+    ) -> BoundId {
+        let id = unsafe { self.nodes.prepare_id() };
+        self.bind_node_with_id(node, expected, compiler, id)
     }
 
     fn bind_literal(
@@ -120,18 +225,24 @@ impl Binder {
         token: Token,
         expected: TypeId,
         compiler: &mut Compiler,
+        id: BoundId,
     ) -> SyntaxNode<Bound> {
         match token.kind {
-            TokenKind::Error => SyntaxNode::error(token.location()),
+            TokenKind::Error => SyntaxNode::error(token.location(), id),
             TokenKind::Integer => {
-                assert!(expected == TypeId::UNKNOWN || expected == TypeId::INTEGER);
+                assert!(expected == TypeId::UNKNOWN || expected == TypeId::UNSIGNED_INTEGER_32);
                 let value = compiler[token.location()].parse().expect("Error handling!");
-                SyntaxNode::<Bound>::literal(token, Value::Integer(value), TypeId::INTEGER)
+                SyntaxNode::<Bound>::literal(
+                    token,
+                    Value::UnsignedInteger32(value),
+                    TypeId::UNSIGNED_INTEGER_32,
+                    id,
+                )
             }
             TokenKind::FalseKeyword | TokenKind::TrueKeyword => {
                 assert!(expected == TypeId::UNKNOWN || expected == TypeId::BOOL);
                 let value = token.kind == TokenKind::TrueKeyword;
-                SyntaxNode::<Bound>::literal(token, Value::Bool(value), TypeId::BOOL)
+                SyntaxNode::<Bound>::literal(token, Value::Bool(value), TypeId::BOOL, id)
             }
             _ => todo!("Parse error!"),
         }
@@ -142,6 +253,7 @@ impl Binder {
         token: Token,
         expected: TypeId,
         compiler: &mut Compiler,
+        id: BoundId,
     ) -> SyntaxNode<Bound> {
         let name = compiler.intern_location(token.location());
         if let Some(variable) = self.look_up_variable_by_name(name) {
@@ -150,6 +262,7 @@ impl Binder {
                 token.location(),
                 variable,
                 self.look_up_constant(variable.id),
+                id,
             )
         } else {
             todo!("Error handling!")
@@ -162,21 +275,23 @@ impl Binder {
         expected: TypeId,
         location: Location,
         compiler: &mut Compiler,
+        id: BoundId,
     ) -> SyntaxNode<Bound> {
         assert_eq!(expected, TypeId::VOID);
-        let mut expression =
-            self.bind_node(*const_declaration_node.expr, TypeId::UNKNOWN, compiler);
+        let expression = self.bind_node(*const_declaration_node.expr, TypeId::UNKNOWN, compiler);
         // let variable = &compiler[];
         let variable = compiler.intern_location(const_declaration_node.identifier.location());
 
-        let Some(variable) = self.register_variable(variable, expression.stage.type_) else {
-            return SyntaxNode::error(const_declaration_node.identifier.location());
+        let type_ = self.type_of(expression);
+        let Some(variable) = self.register_variable(variable, type_) else {
+            dbg!("Failed registering variable");
+            return SyntaxNode::error(const_declaration_node.identifier.location(), id);
         };
-        const_evaluator::evaluate(&mut expression, compiler);
-        let value = expression.stage.constant_value.expect("Is not constant??");
+        let value =
+            const_evaluator::evaluate(expression, compiler, &mut self.nodes).expect("Is constant?");
         self.register_constant(variable, value.clone());
         // todo!();
-        SyntaxNode::<Bound>::const_declaration(location, variable, value)
+        SyntaxNode::<Bound>::const_declaration(location, variable, value, id)
         // SyntaxNode::<Bound>::const_declaration(variable, expression)
     }
 
@@ -194,23 +309,26 @@ impl Binder {
         expected: TypeId,
         location: Location,
         compiler: &mut Compiler,
+        id: BoundId,
     ) -> SyntaxNode<Bound> {
         assert_eq!(expected, TypeId::VOID);
-        let statements: Vec<SyntaxNode<Bound>> = program_node
+        let statements: Vec<BoundId> = program_node
             .top_level_statements
             .into_iter()
             .map(|s| self.bind_node(s, TypeId::VOID, compiler))
             .collect();
-        SyntaxNode::<Bound>::program(statements, location)
+        SyntaxNode::<Bound>::program(statements, location, id)
     }
 
     fn bind_binary(
         &mut self,
+        location: Location,
         binary_node: BinaryNode<Parsed>,
         expected: TypeId,
         compiler: &mut Compiler,
+        id: BoundId,
     ) -> SyntaxNode<Bound> {
-        assert!(expected == TypeId::INTEGER || expected == TypeId::UNKNOWN);
+        assert!(expected == TypeId::UNSIGNED_INTEGER_32 || expected == TypeId::UNKNOWN);
         let lhs = self.bind_node(*binary_node.lhs, TypeId::UNKNOWN, compiler);
         let rhs = self.bind_node(*binary_node.rhs, TypeId::UNKNOWN, compiler);
         let op = match binary_node.op.kind {
@@ -221,7 +339,7 @@ impl Binder {
             TokenKind::Percent => BoundBinaryOperator::Modulo,
             _ => unreachable!("Compiler error!"),
         };
-        SyntaxNode::<Bound>::binary(lhs, op, rhs, TypeId::INTEGER)
+        SyntaxNode::<Bound>::binary(location, lhs, op, rhs, TypeId::UNSIGNED_INTEGER_32, id)
     }
 
     fn look_up_variable_by_name(&self, name: StringId) -> Option<&VariableDeclaration> {
@@ -238,8 +356,9 @@ impl Binder {
         expected: TypeId,
         location: Location,
         compiler: &mut Compiler,
+        id: BoundId,
     ) -> SyntaxNode<Bound> {
-        let entries: Vec<SyntaxNode<Bound>> = array_literal_node
+        let entries: Vec<BoundId> = array_literal_node
             .entries
             .into_iter()
             .map(|e|
@@ -248,15 +367,169 @@ impl Binder {
             .collect();
         let inner_type = entries
             .iter()
-            .map(|e| e.stage.type_)
+            .map(|e| self.type_of(*e))
             .fold(TypeId::UNKNOWN, |acc, cur| acc);
         let length = entries.len();
         let type_ = self.register_type(Type::Array(inner_type, length));
         assert!(type_ == expected || expected == TypeId::UNKNOWN);
-        SyntaxNode::<Bound>::array_literal(entries, type_, location)
+        SyntaxNode::<Bound>::array_literal(entries, type_, location, id)
     }
 
     fn register_type(&mut self, type_: Type) -> TypeId {
         self.types.register(type_)
+    }
+
+    fn bind_expression_statement(
+        &mut self,
+        expression_statement_node: ExpressionStatementNode<Parsed>,
+        expected: TypeId,
+        location: Location,
+        compiler: &mut Compiler,
+        id: BoundId,
+    ) -> SyntaxNode<Bound> {
+        let expression = self.bind_node(
+            *expression_statement_node.expression,
+            TypeId::UNKNOWN,
+            compiler,
+        );
+        let has_semicolon = expression_statement_node.semicolon.is_some();
+        let type_ = if has_semicolon {
+            TypeId::VOID
+        } else {
+            self.type_of(expression)
+        };
+        SyntaxNode::<Bound>::expression_statement(expression, location, has_semicolon, id, type_)
+    }
+
+    fn bind_block_expression(
+        &mut self,
+        block_expression_node: BlockExpressionNode<Parsed>,
+        expected: TypeId,
+        location: Location,
+        compiler: &mut Compiler,
+        id: BoundId,
+    ) -> SyntaxNode<Bound> {
+        let statements: Vec<BoundId> = block_expression_node
+            .body
+            .into_iter()
+            .map(|e| self.bind_node(e, TypeId::UNKNOWN, compiler))
+            .collect();
+        let type_ = statements
+            .last()
+            .map(|s| self.type_of(*s))
+            .unwrap_or(TypeId::VOID);
+        SyntaxNode::<Bound>::block_expression(statements, location, type_, id)
+    }
+
+    fn bind_function_declaration(
+        &mut self,
+        function_declaration_node: FunctionDeclarationNode<Parsed>,
+        expected: TypeId,
+        location: Location,
+        compiler: &mut Compiler,
+        id: BoundId,
+    ) -> SyntaxNode<Bound> {
+        let is_comp = function_declaration_node.comp_keyword.is_some();
+        let identifier = compiler.intern_location(function_declaration_node.identifier.location());
+        let parameters: Vec<_> = function_declaration_node
+            .head
+            .parameters
+            .into_iter()
+            .map(|p| self.bind_parameter(p, compiler))
+            .collect();
+        let return_type = function_declaration_node
+            .head
+            .return_type
+            .map(|(_, t)| {
+                self.bind_type_identifier(t, compiler)
+                    .expect("Did not find type!")
+            })
+            .unwrap_or(TypeId::VOID);
+        let type_ = Type::FunctionType(parameters.iter().map(|(.., t)| *t).collect(), return_type);
+        let type_ = self.register_type(type_);
+        let identifier = self
+            .register_variable(identifier, type_)
+            .expect("no duplicate!");
+        let (parameters, body) = self.creates_scope(compiler, |b, c| {
+            (
+                parameters
+                    .into_iter()
+                    .map(|(l, n, t)| {
+                        let n = b.register_variable(n, t).expect("No failure!");
+                        ParameterNode::<Bound>::new(l, n, t)
+                    })
+                    .collect(),
+                b.bind_node(*function_declaration_node.body, return_type, c),
+            )
+        });
+
+        self.register_constant(identifier, Value::CompileTimeFunction(body));
+
+        SyntaxNode::<Bound>::function_declaration(
+            identifier,
+            location,
+            parameters,
+            body,
+            return_type,
+            is_comp,
+            id,
+        )
+    }
+
+    fn bind_type_identifier(
+        &mut self,
+        t: TypeIdentifier,
+        compiler: &mut Compiler,
+    ) -> Option<TypeId> {
+        let name = compiler.intern_location(t.identifier.location());
+        self.types.find_by_name(name)
+    }
+
+    fn bind_parameter(
+        &mut self,
+        p: ParameterNode<Parsed>,
+        compiler: &mut Compiler,
+    ) -> (Location, StringId, TypeId) {
+        let location = p.location;
+        let name = compiler.intern_location(p.identifier.location());
+        let type_ = self.bind_type_identifier(p.type_, compiler).expect("Type!");
+        (location, name, type_)
+    }
+
+    fn creates_scope<U>(
+        &mut self,
+        compiler: &mut Compiler,
+        c: impl FnOnce(&mut Binder, &mut Compiler) -> U,
+    ) -> U {
+        self.variables.start_scope();
+        let result = c(self, compiler);
+        self.variables.end_scope();
+        result
+    }
+
+    fn bind_function_call(
+        &mut self,
+        function_call_node: FunctionCallNode<Parsed>,
+        expected: TypeId,
+        location: Location,
+        compiler: &mut Compiler,
+        id: BoundId,
+    ) -> SyntaxNode<Bound> {
+        let base = self.bind_node(*function_call_node.base, TypeId::UNKNOWN, compiler);
+        let arguments = function_call_node
+            .arguments
+            .into_iter()
+            .map(|a| self.bind_node(a, TypeId::UNKNOWN, compiler))
+            .collect();
+        let type_ = self.type_of(base);
+        let type_ = self
+            .types
+            .return_type_of(type_)
+            .expect("Function have return types!");
+        SyntaxNode::<Bound>::function_call(location, base, arguments, type_, id)
+    }
+
+    fn type_of(&self, expression: BoundId) -> TypeId {
+        self.nodes[expression].stage.type_
     }
 }

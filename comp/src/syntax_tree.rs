@@ -1,7 +1,8 @@
 #![allow(dead_code)]
-use crate::bind::{BoundBinaryOperator, VariableId};
+use crate::bind::{BoundBinaryOperator, BoundId, VariableId};
 use crate::{HasLocation, Location, lexer::Token, typing::TypeId, value::Value};
 use std::fmt::Debug;
+use std::marker::PhantomData;
 
 #[derive(Debug, Clone)]
 pub struct SyntaxTree<S: Stage> {
@@ -12,29 +13,50 @@ pub struct SyntaxTree<S: Stage> {
 pub struct Parsed;
 #[derive(Debug, Clone)]
 pub struct Bound {
+    pub id: BoundId,
     pub type_: TypeId,
     pub constant_value: Option<Value>,
 }
 
 pub trait Stage: Debug + Clone {
-    type Variable: Debug + Clone;
+    type Identifier: Debug + Clone;
     type Token: Debug + Clone;
     type Value: Debug + Clone;
     type BinaryOp: Debug + Clone;
+    type Type: Debug + Clone;
+    type ChildNodeBoxed: Debug + Clone;
+    type ChildNode: Debug + Clone;
 }
 
 impl Stage for Parsed {
-    type Variable = Token;
+    type Identifier = Token;
     type Token = Token;
     type Value = Box<SyntaxNode<Parsed>>;
     type BinaryOp = Token;
+    type Type = TypeIdentifier;
+    type ChildNodeBoxed = Box<Self::ChildNode>;
+    type ChildNode = SyntaxNode<Parsed>;
 }
 
 impl Stage for Bound {
-    type Variable = VariableId;
+    type Identifier = VariableId;
     type Token = ();
     type Value = Value;
     type BinaryOp = BoundBinaryOperator;
+    type Type = TypeId;
+    type ChildNode = BoundId;
+    type ChildNodeBoxed = BoundId;
+}
+
+#[derive(Debug, Clone)]
+pub struct TypeIdentifier {
+    pub identifier: Token,
+}
+
+impl HasLocation for TypeIdentifier {
+    fn location(&self) -> Location {
+        self.identifier.location()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -51,7 +73,12 @@ impl<S: Stage> HasLocation for SyntaxNode<S> {
 }
 
 impl SyntaxNode<Bound> {
-    pub fn const_declaration(location: Location, variable: VariableId, value: Value) -> Self {
+    pub fn const_declaration(
+        location: Location,
+        variable: VariableId,
+        value: Value,
+        id: BoundId,
+    ) -> Self {
         Self {
             location,
             kind: SyntaxNodeKind::ConstDeclaration(ConstDeclarationNode {
@@ -62,27 +89,30 @@ impl SyntaxNode<Bound> {
                 semicolon: (),
             }),
             stage: Bound {
+                id,
                 type_: TypeId::VOID,
                 constant_value: None,
             },
         }
     }
-    pub fn literal(literal: Token, value: Value, type_: TypeId) -> Self {
+    pub fn literal(literal: Token, value: Value, type_: TypeId, id: BoundId) -> Self {
         Self {
             location: literal.location(),
             kind: SyntaxNodeKind::Literal(literal),
             stage: Bound {
+                id,
                 type_,
                 constant_value: Some(value),
             },
         }
     }
 
-    pub fn error(location: Location) -> Self {
+    pub fn error(location: Location, id: BoundId) -> Self {
         Self {
             location,
             kind: SyntaxNodeKind::Error,
             stage: Bound {
+                id,
                 type_: TypeId::ERROR,
                 constant_value: None,
             },
@@ -90,8 +120,9 @@ impl SyntaxNode<Bound> {
     }
 
     pub(crate) fn program(
-        top_level_statements: Vec<SyntaxNode<Bound>>,
+        top_level_statements: Vec<BoundId>,
         location: Location,
+        id: BoundId,
     ) -> SyntaxNode<Bound> {
         Self {
             location,
@@ -100,6 +131,7 @@ impl SyntaxNode<Bound> {
                 eof: (),
             }),
             stage: Bound {
+                id,
                 type_: TypeId::VOID,
                 constant_value: None,
             },
@@ -107,20 +139,18 @@ impl SyntaxNode<Bound> {
     }
 
     pub(crate) fn binary(
-        lhs: SyntaxNode<Bound>,
+        location: Location,
+        lhs: BoundId,
         op: BoundBinaryOperator,
-        rhs: SyntaxNode<Bound>,
+        rhs: BoundId,
         type_: TypeId,
+        id: BoundId,
     ) -> SyntaxNode<Bound> {
-        let location = lhs.location().combine(rhs.location());
         Self {
             location,
-            kind: SyntaxNodeKind::Binary(BinaryNode {
-                lhs: Box::new(lhs),
-                op,
-                rhs: Box::new(rhs),
-            }),
+            kind: SyntaxNodeKind::Binary(BinaryNode { lhs, op, rhs }),
             stage: Bound {
+                id,
                 type_,
                 constant_value: None,
             },
@@ -131,11 +161,13 @@ impl SyntaxNode<Bound> {
         location: Location,
         variable: &crate::bind::VariableDeclaration,
         constant_value: Option<Value>,
+        id: BoundId,
     ) -> SyntaxNode<Bound> {
         Self {
             location,
             kind: SyntaxNodeKind::Identifier(variable.id),
             stage: Bound {
+                id,
                 type_: variable.type_,
                 constant_value,
             },
@@ -143,9 +175,10 @@ impl SyntaxNode<Bound> {
     }
 
     pub(crate) fn array_literal(
-        entries: Vec<SyntaxNode<Bound>>,
+        entries: Vec<BoundId>,
         type_: TypeId,
         location: Location,
+        id: BoundId,
     ) -> SyntaxNode<Bound> {
         Self {
             location,
@@ -155,11 +188,114 @@ impl SyntaxNode<Bound> {
                 rbracket: (),
             }),
             stage: Bound {
+                id,
                 type_,
                 constant_value: None,
             },
         }
     }
+
+    pub(crate) fn expression_statement(
+        expression: BoundId,
+        location: Location,
+        has_semicolon: bool,
+        id: BoundId,
+        type_: TypeId,
+    ) -> SyntaxNode<Bound> {
+        Self {
+            location,
+            kind: SyntaxNodeKind::ExpressionStatement(ExpressionStatementNode {
+                expression,
+                semicolon: to_option(has_semicolon),
+            }),
+            stage: Bound {
+                id,
+                type_,
+                constant_value: None,
+            },
+        }
+    }
+
+    pub(crate) fn block_expression(
+        body: Vec<BoundId>,
+        location: Location,
+        type_: TypeId,
+        id: BoundId,
+    ) -> SyntaxNode<Bound> {
+        Self {
+            location,
+            kind: SyntaxNodeKind::BlockExpression(BlockExpressionNode {
+                lbrace: (),
+                body,
+                rbrace: (),
+            }),
+            stage: Bound {
+                id,
+                type_,
+                constant_value: None,
+            },
+        }
+    }
+
+    pub(crate) fn function_declaration(
+        identifier: VariableId,
+        location: Location,
+        parameters: Vec<ParameterNode<Bound>>,
+        body: BoundId,
+        return_type: TypeId,
+        is_comp: bool,
+        id: BoundId,
+    ) -> SyntaxNode<Bound> {
+        Self {
+            location,
+            kind: SyntaxNodeKind::FunctionDeclaration(FunctionDeclarationNode {
+                comp_keyword: to_option(is_comp),
+                fn_keyword: (),
+                identifier,
+                head: FunctionHeaderNode {
+                    location,
+                    lparen: (),
+                    parameters,
+                    rparen: (),
+                    return_type: Some(((), return_type)),
+                    _marker: Default::default(),
+                },
+                body,
+            }),
+            stage: Bound {
+                id,
+                type_: TypeId::VOID,
+                constant_value: None,
+            },
+        }
+    }
+
+    pub(crate) fn function_call(
+        location: Location,
+        base: BoundId,
+        arguments: Vec<BoundId>,
+        type_: TypeId,
+        id: BoundId,
+    ) -> SyntaxNode<Bound> {
+        Self {
+            location,
+            kind: SyntaxNodeKind::FunctionCall(FunctionCallNode {
+                base,
+                lparen: (),
+                arguments,
+                rparen: (),
+            }),
+            stage: Bound {
+                id,
+                type_,
+                constant_value: None,
+            },
+        }
+    }
+}
+
+fn to_option(value: bool) -> Option<()> {
+    if value { Some(()) } else { None }
 }
 
 impl SyntaxNode<Parsed> {
@@ -195,6 +331,49 @@ impl SyntaxNode<Parsed> {
                 expr: Box::new(expression),
                 semicolon,
             }),
+        }
+    }
+
+    pub(crate) fn function_declaration(
+        comp_keyword: Option<Token>,
+        fn_keyword: Token,
+        identifier: Token,
+        function_header: FunctionHeaderNode<Parsed>,
+        body: SyntaxNode<Parsed>,
+    ) -> SyntaxNode<Parsed> {
+        let location = fn_keyword
+            .location()
+            .combine(comp_keyword.map(|l| l.location()))
+            .combine(body.location());
+        Self {
+            location,
+            kind: SyntaxNodeKind::FunctionDeclaration(FunctionDeclarationNode {
+                comp_keyword,
+                fn_keyword,
+                identifier,
+                head: function_header,
+                body: Box::new(body),
+            }),
+            stage: Parsed,
+        }
+    }
+
+    pub(crate) fn function_call(
+        base: SyntaxNode<Parsed>,
+        lparen: Token,
+        arguments: Vec<SyntaxNode<Parsed>>,
+        rparen: Token,
+    ) -> SyntaxNode<Parsed> {
+        let location = base.location().combine(rparen.location());
+        Self {
+            location,
+            kind: SyntaxNodeKind::FunctionCall(FunctionCallNode {
+                base: Box::new(base),
+                lparen,
+                arguments,
+                rparen,
+            }),
+            stage: Parsed,
         }
     }
 
@@ -259,6 +438,40 @@ impl SyntaxNode<Parsed> {
             stage: Parsed,
         }
     }
+
+    pub(crate) fn expression_statement(
+        expression: SyntaxNode<Parsed>,
+        semicolon: Option<Token>,
+    ) -> SyntaxNode<Parsed> {
+        let location = expression
+            .location()
+            .combine(semicolon.map(|l| l.location()));
+        Self {
+            location,
+            kind: SyntaxNodeKind::ExpressionStatement(ExpressionStatementNode {
+                expression: Box::new(expression),
+                semicolon,
+            }),
+            stage: Parsed,
+        }
+    }
+
+    pub(crate) fn block_expression(
+        lbrace: Token,
+        body: Vec<SyntaxNode<Parsed>>,
+        rbrace: Token,
+    ) -> SyntaxNode<Parsed> {
+        let location = lbrace.location().combine(rbrace.location());
+        Self {
+            location,
+            kind: SyntaxNodeKind::BlockExpression(BlockExpressionNode {
+                lbrace,
+                body,
+                rbrace,
+            }),
+            stage: Parsed,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -267,16 +480,130 @@ pub enum SyntaxNodeKind<S: Stage> {
     Program(ProgramNode<S>),
     ConstDeclaration(ConstDeclarationNode<S>),
     Literal(Token),
-    Identifier(S::Variable),
+    Identifier(S::Identifier),
     Binary(BinaryNode<S>),
-    CommaedExpression((Box<SyntaxNode<S>>, Option<Token>)),
+    CommaedExpression((S::ChildNodeBoxed, Option<Token>)),
     ArrayLiteral(ArrayLiteralNode<S>),
+    ExpressionStatement(ExpressionStatementNode<S>),
+    BlockExpression(BlockExpressionNode<S>),
+    FunctionDeclaration(FunctionDeclarationNode<S>),
+    FunctionCall(FunctionCallNode<S>),
+}
+
+#[derive(Debug, Clone)]
+pub struct FunctionCallNode<S: Stage> {
+    pub base: S::ChildNodeBoxed,
+    lparen: S::Token,
+    pub arguments: Vec<S::ChildNode>,
+    rparen: S::Token,
+}
+
+#[derive(Debug, Clone)]
+pub struct FunctionDeclarationNode<S: Stage> {
+    pub comp_keyword: Option<S::Token>,
+    fn_keyword: S::Token,
+    pub identifier: S::Identifier,
+    pub head: FunctionHeaderNode<S>,
+    pub body: S::ChildNodeBoxed,
+}
+#[derive(Debug, Clone)]
+pub struct BlockExpressionNode<S: Stage> {
+    lbrace: S::Token,
+    pub body: Vec<S::ChildNode>,
+    rbrace: S::Token,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExpressionStatementNode<S: Stage> {
+    pub expression: S::ChildNodeBoxed,
+    pub semicolon: Option<S::Token>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FunctionHeaderNode<S: Stage> {
+    pub location: Location,
+    lparen: S::Token,
+    pub parameters: Vec<ParameterNode<S>>,
+    rparen: S::Token,
+    pub return_type: Option<(S::Token, S::Type)>,
+    _marker: PhantomData<S>,
+}
+impl FunctionHeaderNode<Parsed> {
+    pub(crate) fn new(
+        lparen: Token,
+        parameters: Vec<ParameterNode<Parsed>>,
+        rparen: Token,
+        return_type: Option<(Token, TypeIdentifier)>,
+    ) -> Self {
+        let location = lparen
+            .location()
+            .combine(rparen.location())
+            .combine(return_type.as_ref().map(|(_, t)| t.location()));
+        Self {
+            location,
+            lparen,
+            parameters,
+            rparen,
+            return_type,
+            _marker: Default::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ParameterNode<S: Stage> {
+    pub location: Location,
+    pub identifier: S::Identifier,
+    colon: S::Token,
+    pub type_: S::Type,
+    comma: Option<S::Token>,
+    _marker: PhantomData<S>,
+}
+
+impl ParameterNode<Bound> {
+    pub fn new(location: Location, identifier: VariableId, type_: TypeId) -> Self {
+        Self {
+            location,
+            identifier,
+            colon: (),
+            type_,
+            comma: None,
+            _marker: Default::default(),
+        }
+    }
+}
+
+impl ParameterNode<Parsed> {
+    pub(crate) fn new(
+        identifier: Token,
+        colon: Token,
+        type_identifier: TypeIdentifier,
+        comma: Option<Token>,
+    ) -> Self {
+        let location = identifier
+            .location()
+            .combine(type_identifier.location())
+            .combine(comma.map(|c| c.location()));
+        Self {
+            location,
+            identifier,
+            colon,
+            type_: type_identifier,
+            comma,
+            _marker: Default::default(),
+        }
+    }
+
+    pub fn ends_with_comma(&self) -> bool {
+        self.comma.is_some()
+    }
 }
 
 impl<S: Stage> SyntaxNodeKind<S> {
     pub fn ends_with_comma(&self) -> bool {
         match self {
             SyntaxNodeKind::CommaedExpression((_, c)) => c.is_some(),
+            // SyntaxNodeKind::Parameter(p) => p.comma.is_some(),
             _ => false,
         }
     }
@@ -285,27 +612,27 @@ impl<S: Stage> SyntaxNodeKind<S> {
 #[derive(Debug, Clone)]
 pub struct ArrayLiteralNode<S: Stage> {
     lbracket: S::Token,
-    pub entries: Vec<SyntaxNode<S>>,
+    pub entries: Vec<S::ChildNode>,
     rbracket: S::Token,
 }
 
 #[derive(Debug, Clone)]
 pub struct BinaryNode<S: Stage> {
-    pub lhs: Box<SyntaxNode<S>>,
+    pub lhs: S::ChildNodeBoxed,
     pub op: S::BinaryOp,
-    pub rhs: Box<SyntaxNode<S>>,
+    pub rhs: S::ChildNodeBoxed,
 }
 
 #[derive(Debug, Clone)]
 pub struct ProgramNode<S: Stage> {
-    pub top_level_statements: Vec<SyntaxNode<S>>,
+    pub top_level_statements: Vec<S::ChildNode>,
     eof: S::Token,
 }
 
 #[derive(Debug, Clone)]
 pub struct ConstDeclarationNode<S: Stage> {
     const_keyword: S::Token,
-    pub identifier: S::Variable,
+    pub identifier: S::Identifier,
     equals: S::Token,
     pub expr: S::Value,
     semicolon: S::Token,
