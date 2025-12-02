@@ -1,6 +1,6 @@
 #![allow(dead_code)]
-use crate::bind::{BoundBinaryOperator, BoundId, VariableId};
-use crate::{HasLocation, Location, lexer::Token, typing::TypeId, value::Value};
+use crate::bind::{BoundBinaryOperator, VariableId};
+use crate::{BoundId, HasLocation, Location, lexer::Token, typing::TypeId, value::Value};
 use std::fmt::Debug;
 use std::marker::PhantomData;
 

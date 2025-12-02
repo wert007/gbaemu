@@ -1,44 +1,31 @@
-use crate::{
-    Compiler,
-    bind::{BoundId, BoundTree},
-    syntax_tree::*,
-    value::Value,
-};
+use crate::{BoundId, Compiler, syntax_tree::*, value::Value};
 
-pub(crate) fn evaluate(
-    expression: BoundId,
-    compiler: &mut Compiler,
-    tree: &mut BoundTree,
-) -> Option<Value> {
-    if let Some(value) = tree.constant_value(expression) {
+pub(crate) fn evaluate(expression: BoundId, compiler: &mut Compiler) -> Option<Value> {
+    if let Some(value) = compiler.nodes.constant_value(expression) {
         return Some(value.clone());
     }
-    let value = evaluate_expression(expression, compiler, &*tree);
-    tree.set_constant_value(expression, value.clone());
+    let value = evaluate_expression(expression, compiler);
+    compiler.nodes.set_constant_value(expression, value.clone());
     value
 }
 
-fn evaluate_expression(
-    expression: BoundId,
-    compiler: &mut Compiler,
-    tree: &BoundTree,
-) -> Option<Value> {
-    if let Some(value) = tree.constant_value(expression) {
+fn evaluate_expression(expression: BoundId, compiler: &mut Compiler) -> Option<Value> {
+    if let Some(value) = compiler.nodes.constant_value(expression) {
         return Some(value.clone());
     }
-    match &tree[expression].kind {
-        SyntaxNodeKind::Binary(binary_node) => evaluate_binary(binary_node, compiler, tree),
+    match compiler.nodes[expression].kind.clone() {
+        SyntaxNodeKind::Binary(binary_node) => evaluate_binary(&binary_node, compiler),
         SyntaxNodeKind::ArrayLiteral(array_literal_node) => {
-            evaluate_array_literal(array_literal_node, compiler, tree)
+            evaluate_array_literal(&array_literal_node, compiler)
         }
         SyntaxNodeKind::FunctionCall(function_call_node) => {
-            evaluate_function_call(function_call_node, compiler, tree)
+            evaluate_function_call(&function_call_node, compiler)
         }
         SyntaxNodeKind::BlockExpression(block_expression_node) => {
-            evaluate_block_expression(block_expression_node, compiler, tree)
+            evaluate_block_expression(&block_expression_node, compiler)
         }
         SyntaxNodeKind::ExpressionStatement(expression_statement_node) => {
-            evaluate_expression_statement(expression_statement_node, compiler, tree)
+            evaluate_expression_statement(&expression_statement_node, compiler)
         }
         _ => None,
     }
@@ -47,9 +34,8 @@ fn evaluate_expression(
 fn evaluate_expression_statement(
     expression_statement_node: &ExpressionStatementNode<Bound>,
     compiler: &mut Compiler,
-    tree: &BoundTree,
 ) -> Option<Value> {
-    let value = evaluate_expression(expression_statement_node.expression, compiler, tree)?;
+    let value = evaluate_expression(expression_statement_node.expression, compiler)?;
     if expression_statement_node.semicolon.is_some() {
         None
     } else {
@@ -60,11 +46,10 @@ fn evaluate_expression_statement(
 fn evaluate_block_expression(
     block_expression_node: &BlockExpressionNode<Bound>,
     compiler: &mut Compiler,
-    tree: &BoundTree,
 ) -> Option<Value> {
     let mut result = None;
     for e in &block_expression_node.body {
-        result = evaluate_expression(*e, compiler, tree);
+        result = evaluate_expression(*e, compiler);
     }
     result
 }
@@ -72,42 +57,36 @@ fn evaluate_block_expression(
 fn evaluate_function_call(
     function_call_node: &FunctionCallNode<Bound>,
     compiler: &mut Compiler,
-    tree: &BoundTree,
 ) -> Option<Value> {
-    let base = evaluate_expression(function_call_node.base, compiler, tree)?;
+    let base = evaluate_expression(function_call_node.base, compiler)?;
     let arguments: Option<Vec<Value>> = function_call_node
         .arguments
         .iter()
         .copied()
-        .map(|a| evaluate_expression(a, compiler, tree))
+        .map(|a| evaluate_expression(a, compiler))
         .collect();
     let arguments = arguments?;
     assert_eq!(arguments.len(), 0);
-    evaluate_expression(base.as_bound_id().unwrap(), compiler, tree)
+    evaluate_expression(base.as_bound_id().unwrap(), compiler)
 }
 
 fn evaluate_array_literal(
     array_literal_node: &ArrayLiteralNode<Bound>,
     compiler: &mut Compiler,
-    tree: &BoundTree,
 ) -> Option<Value> {
     let entries: Option<Vec<Value>> = array_literal_node
         .entries
         .iter()
         .copied()
-        .map(|e| evaluate_expression(e, compiler, tree))
+        .map(|e| evaluate_expression(e, compiler))
         .collect();
     let entries = entries?;
     Some(Value::Array(entries))
 }
 
-fn evaluate_binary(
-    binary_node: &BinaryNode<Bound>,
-    compiler: &mut Compiler,
-    tree: &BoundTree,
-) -> Option<Value> {
-    let lhs = evaluate_expression(binary_node.lhs, compiler, tree)?;
-    let rhs = evaluate_expression(binary_node.rhs, compiler, tree)?;
+fn evaluate_binary(binary_node: &BinaryNode<Bound>, compiler: &mut Compiler) -> Option<Value> {
+    let lhs = evaluate_expression(binary_node.lhs, compiler)?;
+    let rhs = evaluate_expression(binary_node.rhs, compiler)?;
     Some(match binary_node.op {
         crate::bind::BoundBinaryOperator::Addition => {
             Value::UnsignedInteger32(lhs.as_u32()?.wrapping_add(rhs.as_u32()?))

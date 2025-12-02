@@ -1,10 +1,11 @@
 use std::{ops::Index, path::Path};
 
 use crate::{
-    bind::{Binder, BoundTree},
+    bind::Binder,
     lexer::{Lexer, Token},
     parser::Parser,
-    syntax_tree::{Bound, Parsed, SyntaxTree},
+    syntax_tree::{Bound, Parsed, SyntaxNode, SyntaxTree},
+    value::Value,
 };
 
 mod bind;
@@ -19,6 +20,7 @@ pub struct Compiler {
     pub files: SourceText,
     pub diagnostics: Diagnostics,
     pub strings: StringInterner,
+    pub nodes: BoundTree,
 }
 
 impl Index<SourceTextId> for Compiler {
@@ -43,6 +45,7 @@ impl Compiler {
             files: SourceText::empty(),
             diagnostics: Diagnostics::empty(),
             strings: StringInterner::new(),
+            nodes: BoundTree::new(),
         }
     }
 
@@ -63,8 +66,8 @@ impl Compiler {
         Parser::new(file).parse(self)
     }
 
-    pub fn bind(&mut self, file: SourceTextId) -> BoundTree {
-        Binder::new(file, self).bind(self)
+    pub fn bind(&mut self, file: SourceTextId) {
+        Binder::new(file, self).bind(self);
     }
 
     pub fn intern(&mut self, string: impl Into<String>) -> StringId {
@@ -300,5 +303,62 @@ impl Index<Span> for SourceTextFile {
 
     fn index(&self, index: Span) -> &Self::Output {
         &self.content[index.start..][..index.len]
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BoundId(usize);
+
+#[derive(Debug)]
+
+pub struct BoundTree {
+    // root: BoundId,
+    elements: Vec<SyntaxNode<Bound>>,
+    reserved: usize,
+}
+impl BoundTree {
+    fn new() -> Self {
+        Self {
+            elements: Vec::new(),
+            reserved: 0,
+        }
+    }
+
+    pub(crate) fn constant_value(&self, expression: BoundId) -> Option<&Value> {
+        self[expression].stage.constant_value.as_ref()
+    }
+
+    pub(crate) fn set_constant_value(&mut self, expression: BoundId, value: Option<Value>) {
+        self.elements[expression.0].stage.constant_value = value;
+    }
+
+    unsafe fn set(&mut self, id: BoundId, node: SyntaxNode<Bound>) {
+        assert!(id.0 < self.elements.len() + self.reserved);
+        self.reserved -= 1;
+        while self.elements.len() <= id.0 {
+            self.elements.push(SyntaxNode::<Bound>::error(
+                unsafe { Location::zero() },
+                BoundId(0),
+            ));
+        }
+        self.elements[id.0] = node;
+    }
+
+    unsafe fn prepare_id(&mut self) -> BoundId {
+        let id = self.elements.len() + self.reserved;
+        self.reserved += 1;
+        BoundId(id)
+    }
+
+    fn type_of(&self, id: BoundId) -> typing::TypeId {
+        self[id].stage.type_
+    }
+}
+
+impl Index<BoundId> for BoundTree {
+    type Output = SyntaxNode<Bound>;
+
+    fn index(&self, index: BoundId) -> &Self::Output {
+        &self.elements[index.0]
     }
 }

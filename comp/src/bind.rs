@@ -1,66 +1,13 @@
 use std::{collections::HashMap, ops::Index};
 
 use crate::{
-    Compiler, HasLocation, Location, SourceTextId, StringId, const_evaluator,
+    BoundId, Compiler, HasLocation, Location, SourceTextId, StringId, const_evaluator,
     lexer::{Token, TokenKind},
     parser::Parser,
     syntax_tree::*,
     typing::{Type, TypeId, Types},
     value::Value,
 };
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BoundId(usize);
-
-#[derive(Debug)]
-
-pub struct BoundTree {
-    // root: BoundId,
-    elements: Vec<SyntaxNode<Bound>>,
-    reserved: usize,
-}
-impl BoundTree {
-    fn new() -> Self {
-        Self {
-            elements: Vec::new(),
-            reserved: 0,
-        }
-    }
-
-    pub(crate) fn constant_value(&self, expression: BoundId) -> Option<&Value> {
-        self[expression].stage.constant_value.as_ref()
-    }
-
-    pub(crate) fn set_constant_value(&mut self, expression: BoundId, value: Option<Value>) {
-        self.elements[expression.0].stage.constant_value = value;
-    }
-
-    unsafe fn set(&mut self, id: BoundId, node: SyntaxNode<Bound>) {
-        assert!(id.0 < self.elements.len() + self.reserved);
-        self.reserved -= 1;
-        while self.elements.len() <= id.0 {
-            self.elements.push(SyntaxNode::<Bound>::error(
-                unsafe { Location::zero() },
-                BoundId(0),
-            ));
-        }
-        self.elements[id.0] = node;
-    }
-
-    unsafe fn prepare_id(&mut self) -> BoundId {
-        let id = self.elements.len() + self.reserved;
-        self.reserved += 1;
-        BoundId(id)
-    }
-}
-
-impl Index<BoundId> for BoundTree {
-    type Output = SyntaxNode<Bound>;
-
-    fn index(&self, index: BoundId) -> &Self::Output {
-        &self.elements[index.0]
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BoundBinaryOperator {
@@ -130,7 +77,6 @@ pub struct Binder {
     types: Types,
     variables: Variables,
     constants: HashMap<VariableId, Value>,
-    nodes: BoundTree,
 }
 
 impl Binder {
@@ -140,14 +86,13 @@ impl Binder {
             types: Types::new(compiler),
             variables: Variables::new(),
             constants: HashMap::new(),
-            nodes: BoundTree::new(),
         }
     }
 
-    pub fn bind(mut self, compiler: &mut Compiler) -> BoundTree {
+    pub fn bind(mut self, compiler: &mut Compiler) -> BoundId {
         let tree = Parser::new(self.file).parse(compiler);
         let node = self.bind_node(tree.node, TypeId::VOID, compiler);
-        self.nodes
+        node
     }
 
     fn bind_node_with_id(
@@ -205,7 +150,7 @@ impl Binder {
             }
         };
         unsafe {
-            self.nodes.set(id, node);
+            compiler.nodes.set(id, node);
         }
         id
     }
@@ -216,7 +161,7 @@ impl Binder {
         expected: TypeId,
         compiler: &mut Compiler,
     ) -> BoundId {
-        let id = unsafe { self.nodes.prepare_id() };
+        let id = unsafe { compiler.nodes.prepare_id() };
         self.bind_node_with_id(node, expected, compiler, id)
     }
 
@@ -282,13 +227,12 @@ impl Binder {
         // let variable = &compiler[];
         let variable = compiler.intern_location(const_declaration_node.identifier.location());
 
-        let type_ = self.type_of(expression);
+        let type_ = compiler.nodes.type_of(expression);
         let Some(variable) = self.register_variable(variable, type_) else {
             dbg!("Failed registering variable");
             return SyntaxNode::error(const_declaration_node.identifier.location(), id);
         };
-        let value =
-            const_evaluator::evaluate(expression, compiler, &mut self.nodes).expect("Is constant?");
+        let value = const_evaluator::evaluate(expression, compiler).expect("Is constant?");
         self.register_constant(variable, value.clone());
         // todo!();
         SyntaxNode::<Bound>::const_declaration(location, variable, value, id)
@@ -367,7 +311,7 @@ impl Binder {
             .collect();
         let inner_type = entries
             .iter()
-            .map(|e| self.type_of(*e))
+            .map(|e| compiler.nodes.type_of(*e))
             .fold(TypeId::UNKNOWN, |acc, cur| acc);
         let length = entries.len();
         let type_ = self.register_type(Type::Array(inner_type, length));
@@ -396,7 +340,7 @@ impl Binder {
         let type_ = if has_semicolon {
             TypeId::VOID
         } else {
-            self.type_of(expression)
+            compiler.nodes.type_of(expression)
         };
         SyntaxNode::<Bound>::expression_statement(expression, location, has_semicolon, id, type_)
     }
@@ -416,7 +360,7 @@ impl Binder {
             .collect();
         let type_ = statements
             .last()
-            .map(|s| self.type_of(*s))
+            .map(|s| compiler.nodes.type_of(*s))
             .unwrap_or(TypeId::VOID);
         SyntaxNode::<Bound>::block_expression(statements, location, type_, id)
     }
@@ -521,15 +465,11 @@ impl Binder {
             .into_iter()
             .map(|a| self.bind_node(a, TypeId::UNKNOWN, compiler))
             .collect();
-        let type_ = self.type_of(base);
+        let type_ = compiler.nodes.type_of(base);
         let type_ = self
             .types
             .return_type_of(type_)
             .expect("Function have return types!");
         SyntaxNode::<Bound>::function_call(location, base, arguments, type_, id)
-    }
-
-    fn type_of(&self, expression: BoundId) -> TypeId {
-        self.nodes[expression].stage.type_
     }
 }

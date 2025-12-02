@@ -1,4 +1,4 @@
-use crate::bind::BoundId;
+use crate::BoundId;
 
 #[derive(Debug, Clone)]
 pub enum Value {
