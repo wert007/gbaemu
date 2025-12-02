@@ -1,25 +1,43 @@
-use crate::{Compiler, Location, SourceTextId};
+use crate::{Compiler, HasLocation, Location, SourceTextId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Token {
     location: Location,
-    kind: TokenKind,
+    pub kind: TokenKind,
+    is_generated: bool,
 }
+
+impl HasLocation for Token {
+    fn location(&self) -> Location {
+        self.location
+    }
+}
+
 impl Token {
     fn char(location: Location, ch: char) -> Token {
         let kind = match ch {
             '\0' => TokenKind::Eof,
             '=' => TokenKind::Equals,
             ';' => TokenKind::Semicolon,
-            _ => unreachable!(),
+            '+' => TokenKind::Plus,
+            '-' => TokenKind::Minus,
+            '*' => TokenKind::Star,
+            '/' => TokenKind::Slash,
+            '%' => TokenKind::Percent,
+            _ => TokenKind::Error,
         };
-        Self { location, kind }
+        Self {
+            location,
+            kind,
+            is_generated: false,
+        }
     }
 
     fn integer(location: Location) -> Token {
         Self {
             location,
             kind: TokenKind::Integer,
+            is_generated: false,
         }
     }
 
@@ -28,18 +46,48 @@ impl Token {
             "const" => TokenKind::ConstKeyword,
             _ => TokenKind::Identifier,
         };
-        Self { location, kind }
+        Self {
+            location,
+            kind,
+            is_generated: false,
+        }
+    }
+
+    pub(crate) fn generate(kind: TokenKind, location: Location) -> Token {
+        Self {
+            location,
+            kind,
+            is_generated: true,
+        }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenKind {
+    Eof,
+    Error,
     ConstKeyword,
     Identifier,
     Equals,
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    Percent,
     Semicolon,
     Integer,
-    Eof,
+}
+impl TokenKind {
+    pub(crate) fn binary_precedence(&self) -> Option<(usize, usize)> {
+        Some(match self {
+            TokenKind::Plus => (10, 20),
+            TokenKind::Minus => (10, 20),
+            TokenKind::Star => (30, 40),
+            TokenKind::Slash => (30, 40),
+            TokenKind::Percent => (30, 40),
+            _ => return None,
+        })
+    }
 }
 
 pub struct Lexer {
@@ -110,7 +158,11 @@ impl Lexer {
                     let lexeme = &compiler[location];
                     break Some(Token::identifier(location, lexeme));
                 }
-                _ => todo!(),
+                (LexState::Init, Some(ch)) => {
+                    let location = location.with_end_at(self.position);
+                    compiler.diagnostics.report_invalid_char(location, ch);
+                    break Some(Token::char(location, ch));
+                }
             }
         }
     }
