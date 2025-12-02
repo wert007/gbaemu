@@ -124,10 +124,12 @@ impl Binder {
         match token.kind {
             TokenKind::Error => SyntaxNode::error(token.location()),
             TokenKind::Integer => {
+                assert!(expected == TypeId::UNKNOWN || expected == TypeId::INTEGER);
                 let value = compiler[token.location()].parse().expect("Error handling!");
                 SyntaxNode::<Bound>::literal(token, Value::Integer(value), TypeId::INTEGER)
             }
             TokenKind::FalseKeyword | TokenKind::TrueKeyword => {
+                assert!(expected == TypeId::UNKNOWN || expected == TypeId::BOOL);
                 let value = token.kind == TokenKind::TrueKeyword;
                 SyntaxNode::<Bound>::literal(token, Value::Bool(value), TypeId::BOOL)
             }

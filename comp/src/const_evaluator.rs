@@ -1,4 +1,4 @@
-use crate::{Compiler, bind::Binder, syntax_tree::*, value::Value};
+use crate::{Compiler, syntax_tree::*, value::Value};
 
 pub(crate) fn evaluate(expression: &mut SyntaxNode<Bound>, compiler: &mut Compiler) {
     if expression.stage.constant_value.is_some() {

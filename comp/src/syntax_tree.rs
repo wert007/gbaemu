@@ -1,6 +1,6 @@
+#![allow(dead_code)]
 use crate::bind::{BoundBinaryOperator, VariableId};
-use crate::{HasLocation, Location, SourceTextId, lexer::Token, typing::TypeId, value::Value};
-use std::convert::Infallible;
+use crate::{HasLocation, Location, lexer::Token, typing::TypeId, value::Value};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone)]

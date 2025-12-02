@@ -67,11 +67,11 @@ impl Compiler {
         Binder::new(file).bind(self)
     }
 
-    fn intern(&mut self, string: impl Into<String>) -> StringId {
+    pub fn intern(&mut self, string: impl Into<String>) -> StringId {
         self.strings.intern(string)
     }
 
-    fn intern_location(&mut self, location: Location) -> StringId {
+    pub fn intern_location(&mut self, location: Location) -> StringId {
         self.strings.intern(&self.files[location])
     }
 }
