@@ -190,4 +190,8 @@ impl Lexer {
             }
         }
     }
+
+    pub(crate) fn position(&self) -> usize {
+        self.position
+    }
 }

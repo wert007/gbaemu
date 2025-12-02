@@ -11,9 +11,7 @@ comp fn g(): u32 {
 const h = g();
 
 comp fn j<out len: u16>(): [u8; len] {
-    comp {
-        len = 2;
-    }
+    len = 2;
     [0, 1]
 }
 

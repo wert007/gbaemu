@@ -46,7 +46,11 @@ impl Parser {
         let mut result = Vec::new();
         self.expected.push(end);
         while self.peek(0, compiler) != end && self.peek(0, compiler) != TokenKind::Eof {
+            let position = self.lexer.position();
             result.push(body(self, compiler));
+            if position == self.lexer.position() {
+                self.consume(compiler);
+            }
         }
         self.expected.pop();
         result

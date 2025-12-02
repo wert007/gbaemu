@@ -9,3 +9,8 @@ fn g(): u32 {
 }
 
 const h = g();
+
+comp fn j<out len: u16>(): [u8; len] {
+    len = 2;
+    [0, 1]
+}
