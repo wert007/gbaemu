@@ -27,6 +27,8 @@ impl Token {
             '%' => TokenKind::Percent,
             '{' => TokenKind::LBrace,
             '}' => TokenKind::RBrace,
+            '<' => TokenKind::LessThan,
+            '>' => TokenKind::GreaterThan,
             '[' => TokenKind::LBracket,
             ']' => TokenKind::RBracket,
             '(' => TokenKind::LParen,
@@ -100,6 +102,8 @@ pub enum TokenKind {
     FnKeyword,
     LBrace,
     RBrace,
+    LessThan,
+    GreaterThan,
 }
 impl TokenKind {
     pub(crate) fn binary_precedence(&self) -> Option<(usize, usize)> {
@@ -142,7 +146,7 @@ impl Lexer {
             file: self.file,
         };
         self.position += 1;
-        loop {
+        let result = loop {
             if self.position - 1 > compiler[self.file].len() {
                 return None;
             }
@@ -188,7 +192,9 @@ impl Lexer {
                     break Some(Token::char(location, ch));
                 }
             }
-        }
+        };
+        // dbg!(result);
+        result
     }
 
     pub(crate) fn position(&self) -> usize {

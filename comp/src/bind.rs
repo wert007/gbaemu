@@ -148,6 +148,14 @@ impl Binder {
             SyntaxNodeKind::FunctionCall(function_call_node) => {
                 self.bind_function_call(function_call_node, expected, location, compiler, id)
             }
+            SyntaxNodeKind::AssignmentStatement(assignment_statement_node) => self
+                .bind_assignment_statement(
+                    assignment_statement_node,
+                    expected,
+                    location,
+                    compiler,
+                    id,
+                ),
         };
         unsafe {
             compiler.nodes.set(id, node);
@@ -202,7 +210,12 @@ impl Binder {
     ) -> SyntaxNode<Bound> {
         let name = compiler.intern_location(token.location());
         if let Some(variable) = self.look_up_variable_by_name(name) {
-            assert!(expected == variable.type_ || expected == TypeId::UNKNOWN);
+            assert!(
+                expected == variable.type_ || expected == TypeId::UNKNOWN,
+                "{} vs {}",
+                self.types.display(expected),
+                self.types.display(variable.type_)
+            );
             SyntaxNode::<Bound>::variable(
                 token.location(),
                 variable,
@@ -375,12 +388,71 @@ impl Binder {
     ) -> SyntaxNode<Bound> {
         let is_comp = function_declaration_node.comp_keyword.is_some();
         let identifier = compiler.intern_location(function_declaration_node.identifier.location());
-        let parameters: Vec<_> = function_declaration_node
+        let generic_parameters: Vec<(Location, StringId, TypeId)> = function_declaration_node
+            .head
+            .generics
+            .as_ref()
+            .map(|g| {
+                g.parameters
+                    .iter()
+                    .filter_map(|p| {
+                        if let Some((_, t)) = &p.type_ {
+                            Some((
+                                p.location,
+                                compiler.intern_location(p.identifier.location()),
+                                self.bind_type_identifier(t.clone(), compiler)
+                                    .expect("Type exists"),
+                            ))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        // generic_parameters
+        //     .clone()
+        //     .into_iter()
+        //     .map(|(l, n, t)| {
+        //         let n = self.register_variable(n, t).expect("No failure!");
+        //         ParameterNode::<Bound>::new(l, n, t)
+        //     })
+        //     .collect::<Vec<ParameterNode<Bound>>>();
+
+        let body = unsafe { compiler.nodes.prepare_id() };
+        let generics = function_declaration_node.head.generics.map(|g| {
+            let parameters = g
+                .parameters
+                .into_iter()
+                .map(|p| self.bind_generic_parameter(p, compiler, body))
+                .collect();
+            GenericParameterHeaderNode::<Bound>::new(g.location, parameters)
+        });
+
+        let parameters_bound: Vec<_> = function_declaration_node
             .head
             .parameters
             .into_iter()
             .map(|p| self.bind_parameter(p, compiler))
             .collect();
+        let parameters = self.creates_scope(compiler, |b, c| {
+            // let generic_parameters = generic_parameters
+            //     .into_iter()
+            //     .map(|(l, n, t)| {
+            //         let n = b.register_variable(n, t).expect("No failure!");
+            //         ParameterNode::<Bound>::new(l, n, t)
+            //     })
+            //     .collect::<Vec<ParameterNode<Bound>>>();
+            let parameters = parameters_bound
+                .iter()
+                .map(|&(l, n, t)| {
+                    let n = b.register_variable(n, t).expect("No failure!");
+                    ParameterNode::<Bound>::new(l, n, t)
+                })
+                .collect();
+            b.bind_node_with_id(*function_declaration_node.body, TypeId::UNKNOWN, c, body);
+            parameters
+        });
         let return_type = function_declaration_node
             .head
             .return_type
@@ -389,27 +461,19 @@ impl Binder {
                     .expect("Did not find type!")
             })
             .unwrap_or(TypeId::VOID);
-        let type_ = Type::FunctionType(parameters.iter().map(|(.., t)| *t).collect(), return_type);
+        let type_ = Type::FunctionType(
+            parameters_bound.iter().map(|(.., t)| *t).collect(),
+            return_type,
+        );
         let type_ = self.register_type(type_);
         let identifier = self
             .register_variable(identifier, type_)
             .expect("no duplicate!");
-        let (parameters, body) = self.creates_scope(compiler, |b, c| {
-            (
-                parameters
-                    .into_iter()
-                    .map(|(l, n, t)| {
-                        let n = b.register_variable(n, t).expect("No failure!");
-                        ParameterNode::<Bound>::new(l, n, t)
-                    })
-                    .collect(),
-                b.bind_node(*function_declaration_node.body, return_type, c),
-            )
-        });
 
         self.register_constant(identifier, Value::CompileTimeFunction(body));
-
+        // let generics = GenericParameterHeaderNode::new(generic_parameters, generi;
         SyntaxNode::<Bound>::function_declaration(
+            generics,
             identifier,
             location,
             parameters,
@@ -425,8 +489,24 @@ impl Binder {
         t: TypeIdentifier,
         compiler: &mut Compiler,
     ) -> Option<TypeId> {
-        let name = compiler.intern_location(t.identifier.location());
-        self.types.find_by_name(name)
+        match t {
+            TypeIdentifier::Named(name) => {
+                let name = compiler.intern_location(name.location());
+                self.types.find_by_name(name)
+            }
+            TypeIdentifier::Array(array_type_identifier) => {
+                let length = self.bind_node(
+                    *array_type_identifier.length,
+                    TypeId::UNSIGNED_INTEGER_16,
+                    compiler,
+                );
+                let length =
+                    const_evaluator::evaluate(length, compiler).expect("Should be constant!");
+                let length = length.as_usize().expect("Should be int");
+                let inner = self.bind_type_identifier(*array_type_identifier.type_, compiler)?;
+                Some(self.types.register(Type::Array(inner, length as _)))
+            }
+        }
     }
 
     fn bind_parameter(
@@ -471,5 +551,40 @@ impl Binder {
             .return_type_of(type_)
             .expect("Function have return types!");
         SyntaxNode::<Bound>::function_call(location, base, arguments, type_, id)
+    }
+
+    fn bind_assignment_statement(
+        &mut self,
+        assignment_statement_node: AssignmentStatementNode<Parsed>,
+        expected: TypeId,
+        location: Location,
+        compiler: &mut Compiler,
+        id: BoundId,
+    ) -> SyntaxNode<Bound> {
+        let lhs = self.bind_node(*assignment_statement_node.lhs, expected, compiler);
+        let value = self.bind_node(*assignment_statement_node.value, expected, compiler);
+        SyntaxNode::<Bound>::assignment_statement(lhs, value, location, id)
+    }
+
+    fn bind_generic_parameter(
+        &mut self,
+        p: GenericParameterNode<Parsed>,
+        compiler: &mut Compiler,
+        body: BoundId,
+    ) -> GenericParameterNode<Bound> {
+        let is_out = p.out.is_some();
+        let identifier = compiler.intern_location(p.identifier.location());
+        let type_ = p
+            .type_
+            .map(|(_, t)| self.bind_type_identifier(t, compiler).expect("Valid type!"));
+        let identifier_type = type_.unwrap_or(TypeId::TYPE);
+        let identifier = self
+            .register_variable(identifier, identifier_type)
+            .expect("Success");
+        if is_out {
+            assert!(type_.is_some());
+            self.register_constant(identifier, Value::DependentOn(body));
+        }
+        GenericParameterNode::<Bound>::new(is_out, identifier, type_, p.location)
     }
 }

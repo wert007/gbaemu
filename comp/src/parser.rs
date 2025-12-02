@@ -4,7 +4,8 @@ use crate::{
     Compiler, HasLocation, SourceTextId,
     lexer::{Lexer, Token, TokenKind},
     syntax_tree::{
-        FunctionHeaderNode, ParameterNode, Parsed, SyntaxNode, SyntaxTree, TypeIdentifier,
+        ArrayTypeIdentifier, FunctionHeaderNode, GenericParameterHeaderNode, GenericParameterNode,
+        ParameterNode, Parsed, SyntaxNode, SyntaxTree, TypeIdentifier,
     },
 };
 
@@ -151,8 +152,8 @@ impl Parser {
                 let literal = self.consume(compiler);
                 SyntaxNode::<Parsed>::literal(literal)
             }
-            _ => {
-                todo!("Error handling!")
+            unexpected => {
+                todo!("Error handling! {unexpected:#?}")
             }
         }
     }
@@ -211,6 +212,20 @@ impl Parser {
     }
 
     fn parse_function_header(&mut self, compiler: &mut Compiler) -> FunctionHeaderNode<Parsed> {
+        let generics = if self.peek(0, compiler) == TokenKind::LessThan {
+            let less_than = self.expect(TokenKind::LessThan, compiler);
+            let generic_parameter = self.parse_until(TokenKind::GreaterThan, compiler, |p, c| {
+                p.parse_generic_parameter(c)
+            });
+            let greater_than = self.expect(TokenKind::GreaterThan, compiler);
+            Some(GenericParameterHeaderNode::<Parsed>::new(
+                less_than,
+                generic_parameter,
+                greater_than,
+            ))
+        } else {
+            None
+        };
         let lparen = self.expect(TokenKind::LParen, compiler);
         let parameters = self.parse_until(TokenKind::RParen, compiler, |p, c| p.parse_parameter(c));
         let rparen = self.expect(TokenKind::RParen, compiler);
@@ -228,7 +243,7 @@ impl Parser {
         } else {
             None
         };
-        FunctionHeaderNode::<Parsed>::new(lparen, parameters, rparen, return_type)
+        FunctionHeaderNode::<Parsed>::new(generics, lparen, parameters, rparen, return_type)
     }
 
     fn parse_parameter(&mut self, compiler: &mut Compiler) -> ParameterNode<Parsed> {
@@ -240,8 +255,27 @@ impl Parser {
     }
 
     fn parse_type_identifier(&mut self, compiler: &mut Compiler) -> TypeIdentifier {
-        let identifier = self.expect(TokenKind::Identifier, compiler);
-        TypeIdentifier { identifier }
+        match self.peek(0, compiler) {
+            TokenKind::Identifier => {
+                let identifier = self.expect(TokenKind::Identifier, compiler);
+                TypeIdentifier::Named(identifier)
+            }
+            TokenKind::LBracket => {
+                let lbracket = self.expect(TokenKind::LBracket, compiler);
+                let type_ = self.parse_type_identifier(compiler);
+                let semicolon = self.expect(TokenKind::Semicolon, compiler);
+                let length = self.parse_expression(compiler);
+                let rbracket = self.expect(TokenKind::RBracket, compiler);
+                TypeIdentifier::Array(ArrayTypeIdentifier {
+                    lbracket,
+                    type_: Box::new(type_),
+                    semicolon,
+                    length: Box::new(length),
+                    rbracket,
+                })
+            }
+            unexpected => todo!("Error handling! {unexpected:#?}"),
+        }
     }
 
     fn parse_block_expression(&mut self, compiler: &mut Compiler) -> SyntaxNode<Parsed> {
@@ -260,8 +294,15 @@ impl Parser {
 
     fn parse_expression_statement(&mut self, compiler: &mut Compiler) -> SyntaxNode<Parsed> {
         let expression = self.parse_expression(compiler);
-        let semicolon = self.maybe_expect(TokenKind::Semicolon, compiler);
-        SyntaxNode::<Parsed>::expression_statement(expression, semicolon)
+        if self.peek(0, compiler) == TokenKind::Equals {
+            let equals = self.expect(TokenKind::Equals, compiler);
+            let value = self.parse_expression(compiler);
+            let semicolon = self.expect(TokenKind::Semicolon, compiler);
+            SyntaxNode::<Parsed>::assignment_statement(expression, equals, value, semicolon)
+        } else {
+            let semicolon = self.maybe_expect(TokenKind::Semicolon, compiler);
+            SyntaxNode::<Parsed>::expression_statement(expression, semicolon)
+        }
     }
 
     fn parse_function_call(
@@ -289,5 +330,30 @@ impl Parser {
             base = SyntaxNode::<Parsed>::function_call(base, lparen, arguments, rparen);
         }
         base
+    }
+
+    fn parse_generic_parameter(&mut self, compiler: &mut Compiler) -> GenericParameterNode<Parsed> {
+        let out = self.maybe_identifier("out", compiler);
+        let identifier = self.expect(TokenKind::Identifier, compiler);
+        let type_ = if self.peek(0, compiler) == TokenKind::Colon {
+            let colon = self.expect(TokenKind::Colon, compiler);
+            let type_ = self.parse_type_identifier(compiler);
+            Some((colon, type_))
+        } else {
+            assert!(out.is_none());
+            None
+        };
+        let comma = self.maybe_expect(TokenKind::Comma, compiler);
+        GenericParameterNode::<Parsed>::new(out, identifier, type_, comma)
+    }
+
+    fn maybe_identifier(&mut self, lexeme: &str, compiler: &mut Compiler) -> Option<Token> {
+        if self.peek(0, compiler) == TokenKind::Identifier
+            && &compiler[self.buffer[0].location()] == lexeme
+        {
+            Some(self.consume(compiler))
+        } else {
+            None
+        }
     }
 }

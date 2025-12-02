@@ -49,14 +49,30 @@ impl Stage for Bound {
 }
 
 #[derive(Debug, Clone)]
-pub struct TypeIdentifier {
-    pub identifier: Token,
+pub enum TypeIdentifier {
+    Named(Token),
+    Array(ArrayTypeIdentifier),
 }
 
 impl HasLocation for TypeIdentifier {
     fn location(&self) -> Location {
-        self.identifier.location()
+        match self {
+            TypeIdentifier::Named(token) => token.location(),
+            TypeIdentifier::Array(array_type_identifier) => array_type_identifier
+                .lbracket
+                .location()
+                .combine(array_type_identifier.rbracket.location()),
+        }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct ArrayTypeIdentifier {
+    pub lbracket: Token,
+    pub type_: Box<TypeIdentifier>,
+    pub semicolon: Token,
+    pub length: Box<SyntaxNode<Parsed>>,
+    pub rbracket: Token,
 }
 
 #[derive(Debug, Clone)]
@@ -238,6 +254,7 @@ impl SyntaxNode<Bound> {
     }
 
     pub(crate) fn function_declaration(
+        generics: Option<GenericParameterHeaderNode<Bound>>,
         identifier: VariableId,
         location: Location,
         parameters: Vec<ParameterNode<Bound>>,
@@ -253,6 +270,7 @@ impl SyntaxNode<Bound> {
                 fn_keyword: (),
                 identifier,
                 head: FunctionHeaderNode {
+                    generics,
                     location,
                     lparen: (),
                     parameters,
@@ -288,6 +306,28 @@ impl SyntaxNode<Bound> {
             stage: Bound {
                 id,
                 type_,
+                constant_value: None,
+            },
+        }
+    }
+
+    pub(crate) fn assignment_statement(
+        lhs: BoundId,
+        value: BoundId,
+        location: Location,
+        id: BoundId,
+    ) -> SyntaxNode<Bound> {
+        Self {
+            location,
+            kind: SyntaxNodeKind::AssignmentStatement(AssignmentStatementNode {
+                lhs,
+                equals: (),
+                value,
+                semicolon: (),
+            }),
+            stage: Bound {
+                id,
+                type_: TypeId::VOID,
                 constant_value: None,
             },
         }
@@ -353,6 +393,25 @@ impl SyntaxNode<Parsed> {
                 identifier,
                 head: function_header,
                 body: Box::new(body),
+            }),
+            stage: Parsed,
+        }
+    }
+
+    pub(crate) fn assignment_statement(
+        lhs: SyntaxNode<Parsed>,
+        equals: Token,
+        value: SyntaxNode<Parsed>,
+        semicolon: Token,
+    ) -> SyntaxNode<Parsed> {
+        let location = lhs.location().combine(semicolon.location());
+        Self {
+            location,
+            kind: SyntaxNodeKind::AssignmentStatement(AssignmentStatementNode {
+                lhs: Box::new(lhs),
+                equals,
+                value: Box::new(value),
+                semicolon,
             }),
             stage: Parsed,
         }
@@ -488,6 +547,7 @@ pub enum SyntaxNodeKind<S: Stage> {
     BlockExpression(BlockExpressionNode<S>),
     FunctionDeclaration(FunctionDeclarationNode<S>),
     FunctionCall(FunctionCallNode<S>),
+    AssignmentStatement(AssignmentStatementNode<S>),
 }
 
 #[derive(Debug, Clone)]
@@ -496,6 +556,14 @@ pub struct FunctionCallNode<S: Stage> {
     lparen: S::Token,
     pub arguments: Vec<S::ChildNode>,
     rparen: S::Token,
+}
+
+#[derive(Debug, Clone)]
+pub struct AssignmentStatementNode<S: Stage> {
+    pub lhs: S::ChildNodeBoxed,
+    equals: S::Token,
+    pub value: S::ChildNodeBoxed,
+    semicolon: S::Token,
 }
 
 #[derive(Debug, Clone)]
@@ -527,9 +595,11 @@ pub struct FunctionHeaderNode<S: Stage> {
     rparen: S::Token,
     pub return_type: Option<(S::Token, S::Type)>,
     _marker: PhantomData<S>,
+    pub generics: Option<GenericParameterHeaderNode<S>>,
 }
 impl FunctionHeaderNode<Parsed> {
     pub(crate) fn new(
+        generics: Option<GenericParameterHeaderNode<Parsed>>,
         lparen: Token,
         parameters: Vec<ParameterNode<Parsed>>,
         rparen: Token,
@@ -538,9 +608,11 @@ impl FunctionHeaderNode<Parsed> {
         let location = lparen
             .location()
             .combine(rparen.location())
-            .combine(return_type.as_ref().map(|(_, t)| t.location()));
+            .combine(return_type.as_ref().map(|(_, t)| t.location()))
+            .combine(generics.as_ref().map(|g| g.location()));
         Self {
             location,
+            generics,
             lparen,
             parameters,
             rparen,
@@ -550,6 +622,94 @@ impl FunctionHeaderNode<Parsed> {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct GenericParameterHeaderNode<S: Stage> {
+    pub location: Location,
+    pub less_than: S::Token,
+    pub parameters: Vec<GenericParameterNode<S>>,
+    pub greater_than: S::Token,
+}
+
+impl GenericParameterHeaderNode<Bound> {
+    pub fn new(location: Location, parameters: Vec<GenericParameterNode<Bound>>) -> Self {
+        Self {
+            location,
+            less_than: (),
+            parameters,
+            greater_than: (),
+        }
+    }
+}
+
+impl GenericParameterHeaderNode<Parsed> {
+    pub(crate) fn new(
+        less_than: Token,
+        parameters: Vec<GenericParameterNode<Parsed>>,
+        greater_than: Token,
+    ) -> Self {
+        let location = less_than.location().combine(greater_than.location());
+        Self {
+            location,
+            less_than,
+            parameters,
+            greater_than,
+        }
+    }
+}
+
+impl<S: Stage> HasLocation for GenericParameterHeaderNode<S> {
+    fn location(&self) -> Location {
+        self.location
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct GenericParameterNode<S: Stage> {
+    pub location: Location,
+    pub out: Option<S::Token>,
+    pub identifier: S::Identifier,
+    pub type_: Option<(S::Token, S::Type)>,
+    pub comma: Option<S::Token>,
+}
+
+impl GenericParameterNode<Bound> {
+    pub fn new(
+        is_out: bool,
+        identifier: VariableId,
+        type_: Option<TypeId>,
+        location: Location,
+    ) -> Self {
+        Self {
+            location,
+            out: to_option(is_out),
+            identifier,
+            type_: type_.map(|t| ((), t)),
+            comma: None,
+        }
+    }
+}
+
+impl GenericParameterNode<Parsed> {
+    pub(crate) fn new(
+        out: Option<Token>,
+        identifier: Token,
+        type_: Option<(Token, TypeIdentifier)>,
+        comma: Option<Token>,
+    ) -> Self {
+        let location = identifier
+            .location()
+            .combine(out.map(|l| l.location()))
+            .combine(type_.as_ref().map(|(_, t)| t.location()))
+            .combine(comma.map(|l| l.location()));
+        Self {
+            location,
+            out,
+            identifier,
+            type_,
+            comma,
+        }
+    }
+}
 #[derive(Debug, Clone)]
 pub struct ParameterNode<S: Stage> {
     pub location: Location,

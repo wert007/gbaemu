@@ -1,6 +1,6 @@
 use std::{collections::HashMap, ops::Index};
 
-use crate::{Compiler, StringId};
+use crate::{Compiler, StringId, StringInterner};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TypeId(usize);
@@ -9,8 +9,11 @@ impl TypeId {
     pub const ERROR: TypeId = TypeId(0);
     pub const UNKNOWN: TypeId = TypeId(1);
     pub const VOID: TypeId = TypeId(2);
-    pub const UNSIGNED_INTEGER_32: TypeId = TypeId(3);
-    pub const BOOL: TypeId = TypeId(4);
+    pub const TYPE: TypeId = TypeId(3);
+    pub const UNSIGNED_INTEGER_8: TypeId = TypeId(4);
+    pub const UNSIGNED_INTEGER_16: TypeId = TypeId(5);
+    pub const UNSIGNED_INTEGER_32: TypeId = TypeId(6);
+    pub const BOOL: TypeId = TypeId(7);
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -18,6 +21,9 @@ pub enum Type {
     Error,
     Unknown,
     Void,
+    Type,
+    UnsignedInteger8,
+    UnsignedInteger16,
     UnsignedInteger32,
     Bool,
     Array(TypeId, usize),
@@ -40,6 +46,8 @@ impl Types {
     pub fn new(compiler: &mut Compiler) -> Self {
         let names = type_names!(compiler =>
             VOID, "void",
+            UNSIGNED_INTEGER_8, "u8",
+            UNSIGNED_INTEGER_16, "u16",
             UNSIGNED_INTEGER_32, "u32",
             BOOL, "bool",
         );
@@ -48,6 +56,9 @@ impl Types {
                 Type::Error,
                 Type::Unknown,
                 Type::Void,
+                Type::Type,
+                Type::UnsignedInteger8,
+                Type::UnsignedInteger16,
                 Type::UnsignedInteger32,
                 Type::Bool,
             ],
@@ -56,6 +67,7 @@ impl Types {
         assert_eq!(result[TypeId::ERROR], Type::Error);
         assert_eq!(result[TypeId::UNKNOWN], Type::Unknown);
         assert_eq!(result[TypeId::VOID], Type::Void);
+        assert_eq!(result[TypeId::TYPE], Type::Type);
         assert_eq!(result[TypeId::UNSIGNED_INTEGER_32], Type::UnsignedInteger32);
         assert_eq!(result[TypeId::BOOL], Type::Bool);
         result
@@ -82,6 +94,33 @@ impl Types {
         match self[type_] {
             Type::FunctionType(_, type_) => Some(type_),
             _ => None,
+        }
+    }
+
+    pub fn display(&self, type_: TypeId) -> String {
+        match &self[type_] {
+            Type::Error => "#error".into(),
+            Type::Unknown => "?unknown".into(),
+            Type::Void => "void".into(),
+            Type::Type => "type".into(),
+            Type::UnsignedInteger8 => "u8".into(),
+            Type::UnsignedInteger16 => "u16".into(),
+            Type::UnsignedInteger32 => "u32".into(),
+            Type::Bool => "bool".into(),
+            Type::Array(type_, len) => format!("[{}; {len}]", self.display(*type_)),
+            Type::FunctionType(parameter, return_type) => {
+                let parameter = parameter.iter().copied().map(|p| self.display(p)).fold(
+                    String::new(),
+                    |acc, cur| {
+                        if acc.is_empty() {
+                            cur
+                        } else {
+                            format!("{acc}, {cur}")
+                        }
+                    },
+                );
+                format!("Fn<({parameter}), {}>", self.display(*return_type))
+            }
         }
     }
 }
