@@ -128,7 +128,6 @@ impl Parser {
                 break;
             }
             let op = self.consume(compiler);
-            dbg!(op);
             let rhs = self.parse_binary(rhs, compiler);
             expression = SyntaxNode::<Parsed>::binary(expression, op, rhs);
         }
@@ -137,8 +136,15 @@ impl Parser {
     }
 
     fn parse_literal(&mut self, compiler: &mut Compiler) -> SyntaxNode<Parsed> {
-        let literal = self.expect(TokenKind::Integer, compiler);
-        SyntaxNode::<Parsed>::literal(literal)
+        match self.peek(0, compiler) {
+            TokenKind::Integer | TokenKind::TrueKeyword | TokenKind::FalseKeyword => {
+                let literal = self.consume(compiler);
+                SyntaxNode::<Parsed>::literal(literal)
+            }
+            _ => {
+                todo!("Error handling!")
+            }
+        }
     }
 
     fn parse_variable(&mut self, compiler: &mut Compiler) -> SyntaxNode<Parsed> {
@@ -148,9 +154,30 @@ impl Parser {
 
     fn parse_expression_atom(&mut self, compiler: &mut Compiler) -> SyntaxNode<Parsed> {
         match self.peek(0, compiler) {
-            TokenKind::Integer => self.parse_literal(compiler),
             TokenKind::Identifier => self.parse_variable(compiler),
-            _ => todo!("Error handling!"),
+            TokenKind::LBracket => self.parse_array_literal(compiler),
+            _ => self.parse_literal(compiler),
         }
+    }
+
+    fn parse_array_literal(&mut self, compiler: &mut Compiler) -> SyntaxNode<Parsed> {
+        let lbracket = self.expect(TokenKind::LBracket, compiler);
+        let entries = self.parse_until(TokenKind::RBracket, compiler, |p, c| {
+            let expression = p.parse_expression(c);
+            let comma = if p.peek(0, c) == TokenKind::Comma {
+                Some(p.consume(c))
+            } else {
+                None
+            };
+            SyntaxNode::<Parsed>::commaed_expression(expression, comma)
+        });
+        assert!(
+            entries[..entries.len() - 1]
+                .iter()
+                .all(|e| e.kind.ends_with_comma()),
+            "TODO: Error handling"
+        );
+        let rbracket = self.expect(TokenKind::RBracket, compiler);
+        SyntaxNode::<Parsed>::array_literal(lbracket, entries, rbracket)
     }
 }

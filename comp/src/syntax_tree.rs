@@ -141,6 +141,25 @@ impl SyntaxNode<Bound> {
             },
         }
     }
+
+    pub(crate) fn array_literal(
+        entries: Vec<SyntaxNode<Bound>>,
+        type_: TypeId,
+        location: Location,
+    ) -> SyntaxNode<Bound> {
+        Self {
+            location,
+            kind: SyntaxNodeKind::ArrayLiteral(ArrayLiteralNode {
+                lbracket: (),
+                entries,
+                rbracket: (),
+            }),
+            stage: Bound {
+                type_,
+                constant_value: None,
+            },
+        }
+    }
 }
 
 impl SyntaxNode<Parsed> {
@@ -211,6 +230,35 @@ impl SyntaxNode<Parsed> {
             stage: Parsed,
         }
     }
+
+    pub(crate) fn commaed_expression(
+        expression: SyntaxNode<Parsed>,
+        comma: Option<Token>,
+    ) -> SyntaxNode<Parsed> {
+        let location = expression.location.combine(comma.map(|c| c.location()));
+        Self {
+            location,
+            kind: SyntaxNodeKind::CommaedExpression((Box::new(expression), comma)),
+            stage: Parsed,
+        }
+    }
+
+    pub(crate) fn array_literal(
+        lbracket: Token,
+        entries: Vec<SyntaxNode<Parsed>>,
+        rbracket: Token,
+    ) -> SyntaxNode<Parsed> {
+        let location = lbracket.location().combine(rbracket.location());
+        Self {
+            location,
+            kind: SyntaxNodeKind::ArrayLiteral(ArrayLiteralNode {
+                lbracket,
+                entries,
+                rbracket,
+            }),
+            stage: Parsed,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -221,6 +269,24 @@ pub enum SyntaxNodeKind<S: Stage> {
     Literal(Token),
     Identifier(S::Variable),
     Binary(BinaryNode<S>),
+    CommaedExpression((Box<SyntaxNode<S>>, Option<Token>)),
+    ArrayLiteral(ArrayLiteralNode<S>),
+}
+
+impl<S: Stage> SyntaxNodeKind<S> {
+    pub fn ends_with_comma(&self) -> bool {
+        match self {
+            SyntaxNodeKind::CommaedExpression((_, c)) => c.is_some(),
+            _ => false,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ArrayLiteralNode<S: Stage> {
+    lbracket: S::Token,
+    pub entries: Vec<SyntaxNode<S>>,
+    rbracket: S::Token,
 }
 
 #[derive(Debug, Clone)]

@@ -108,6 +108,10 @@ impl Binder {
             SyntaxNodeKind::Identifier(identifier) => {
                 self.bind_identifier(identifier, expected, compiler)
             }
+            SyntaxNodeKind::CommaedExpression((e, _)) => self.bind_node(*e, expected, compiler),
+            SyntaxNodeKind::ArrayLiteral(array_literal_node) => {
+                self.bind_array_literal(array_literal_node, expected, location, compiler)
+            }
         }
     }
 
@@ -123,6 +127,10 @@ impl Binder {
                 let value = compiler[token.location()].parse().expect("Error handling!");
                 SyntaxNode::<Bound>::literal(token, Value::Integer(value), TypeId::INTEGER)
             }
+            TokenKind::FalseKeyword | TokenKind::TrueKeyword => {
+                let value = token.kind == TokenKind::TrueKeyword;
+                SyntaxNode::<Bound>::literal(token, Value::Bool(value), TypeId::BOOL)
+            }
             _ => todo!("Parse error!"),
         }
     }
@@ -135,6 +143,7 @@ impl Binder {
     ) -> SyntaxNode<Bound> {
         let name = compiler.intern_location(token.location());
         if let Some(variable) = self.look_up_variable_by_name(name) {
+            assert!(expected == variable.type_ || expected == TypeId::UNKNOWN);
             SyntaxNode::<Bound>::variable(
                 token.location(),
                 variable,
@@ -152,6 +161,7 @@ impl Binder {
         location: Location,
         compiler: &mut Compiler,
     ) -> SyntaxNode<Bound> {
+        assert_eq!(expected, TypeId::VOID);
         let mut expression =
             self.bind_node(*const_declaration_node.expr, TypeId::UNKNOWN, compiler);
         // let variable = &compiler[];
@@ -183,6 +193,7 @@ impl Binder {
         location: Location,
         compiler: &mut Compiler,
     ) -> SyntaxNode<Bound> {
+        assert_eq!(expected, TypeId::VOID);
         let statements: Vec<SyntaxNode<Bound>> = program_node
             .top_level_statements
             .into_iter()
@@ -197,6 +208,7 @@ impl Binder {
         expected: TypeId,
         compiler: &mut Compiler,
     ) -> SyntaxNode<Bound> {
+        assert!(expected == TypeId::INTEGER || expected == TypeId::UNKNOWN);
         let lhs = self.bind_node(*binary_node.lhs, TypeId::UNKNOWN, compiler);
         let rhs = self.bind_node(*binary_node.rhs, TypeId::UNKNOWN, compiler);
         let op = match binary_node.op.kind {
@@ -216,5 +228,33 @@ impl Binder {
 
     fn look_up_constant(&self, id: VariableId) -> Option<Value> {
         self.constants.get(&id).cloned()
+    }
+
+    fn bind_array_literal(
+        &mut self,
+        array_literal_node: ArrayLiteralNode<Parsed>,
+        expected: TypeId,
+        location: Location,
+        compiler: &mut Compiler,
+    ) -> SyntaxNode<Bound> {
+        let entries: Vec<SyntaxNode<Bound>> = array_literal_node
+            .entries
+            .into_iter()
+            .map(|e|
+            // TODO: Use correct expected Type here!
+            self.bind_node(e, TypeId::UNKNOWN, compiler))
+            .collect();
+        let inner_type = entries
+            .iter()
+            .map(|e| e.stage.type_)
+            .fold(TypeId::UNKNOWN, |acc, cur| acc);
+        let length = entries.len();
+        let type_ = self.register_type(Type::Array(inner_type, length));
+        assert!(type_ == expected || expected == TypeId::UNKNOWN);
+        SyntaxNode::<Bound>::array_literal(entries, type_, location)
+    }
+
+    fn register_type(&mut self, type_: Type) -> TypeId {
+        self.types.register(type_)
     }
 }

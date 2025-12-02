@@ -13,9 +13,25 @@ fn evaluate_expression(expression: &SyntaxNode<Bound>, compiler: &mut Compiler) 
         return Some(value);
     }
     match &expression.kind {
-        SyntaxNodeKind::Binary(binary_node) => evaluate_binary(&binary_node, compiler),
+        SyntaxNodeKind::Binary(binary_node) => evaluate_binary(binary_node, compiler),
+        SyntaxNodeKind::ArrayLiteral(array_literal_node) => {
+            evaluate_array_literal(array_literal_node, compiler)
+        }
         _ => None,
     }
+}
+
+fn evaluate_array_literal(
+    array_literal_node: &ArrayLiteralNode<Bound>,
+    compiler: &mut Compiler,
+) -> Option<Value> {
+    let entries: Option<Vec<Value>> = array_literal_node
+        .entries
+        .iter()
+        .map(|e| evaluate_expression(e, compiler))
+        .collect();
+    let entries = entries?;
+    Some(Value::Array(entries))
 }
 
 fn evaluate_binary(binary_node: &BinaryNode<Bound>, compiler: &mut Compiler) -> Option<Value> {

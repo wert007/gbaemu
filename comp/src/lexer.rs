@@ -24,6 +24,9 @@ impl Token {
             '*' => TokenKind::Star,
             '/' => TokenKind::Slash,
             '%' => TokenKind::Percent,
+            '[' => TokenKind::LBracket,
+            ']' => TokenKind::RBracket,
+            ',' => TokenKind::Comma,
             _ => TokenKind::Error,
         };
         Self {
@@ -44,6 +47,8 @@ impl Token {
     fn identifier(location: Location, lexeme: &str) -> Token {
         let kind = match lexeme {
             "const" => TokenKind::ConstKeyword,
+            "true" => TokenKind::TrueKeyword,
+            "false" => TokenKind::FalseKeyword,
             _ => TokenKind::Identifier,
         };
         Self {
@@ -67,6 +72,8 @@ pub enum TokenKind {
     Eof,
     Error,
     ConstKeyword,
+    TrueKeyword,
+    FalseKeyword,
     Identifier,
     Equals,
     Plus,
@@ -76,6 +83,9 @@ pub enum TokenKind {
     Percent,
     Semicolon,
     Integer,
+    LBracket,
+    RBracket,
+    Comma,
 }
 impl TokenKind {
     pub(crate) fn binary_precedence(&self) -> Option<(usize, usize)> {
