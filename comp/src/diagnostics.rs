@@ -1,7 +1,7 @@
 use std::fmt::Display;
 
 use crate::{
-    Location, SourceText, StringInterner,
+    Location, SourceText, StringId, StringInterner,
     bind::BoundBinaryOperator,
     lexer::TokenKind,
     typing::{TypeId, Types},
@@ -22,6 +22,16 @@ pub trait DiagnosticMessageComponent {
     ) -> std::fmt::Result;
 }
 
+impl DiagnosticMessageComponent for StringId {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+        _types: &Types,
+        strings: &StringInterner,
+    ) -> std::fmt::Result {
+        std::fmt::Display::fmt(&strings[*self], f)
+    }
+}
 impl DiagnosticMessageComponent for &str {
     fn fmt(
         &self,
@@ -169,10 +179,10 @@ impl Diagnostic {
         }
     }
 
-    fn cannot_find_type(location: Location) -> Diagnostic {
+    fn cannot_find_type(location: Location, name: StringId) -> Diagnostic {
         Self {
             location,
-            message: "No type by this name could be found.".into(),
+            message: dgnst!("No type named ", name, " could be found.",),
         }
     }
 
@@ -297,9 +307,9 @@ impl Diagnostics {
             ));
     }
 
-    pub fn report_cannot_find_type(&mut self, location: Location) {
+    pub fn report_cannot_find_type(&mut self, location: Location, name: StringId) {
         self.diagnostics
-            .push(Diagnostic::cannot_find_type(location))
+            .push(Diagnostic::cannot_find_type(location, name))
     }
 
     pub fn report_non_const_value_in_type(&mut self, location: Location) {

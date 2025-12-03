@@ -631,7 +631,9 @@ impl Binder {
                 match compiler.types.find_by_name(name) {
                     Some(it) => it,
                     None => {
-                        compiler.diagnostics.report_cannot_find_type(t.location());
+                        compiler
+                            .diagnostics
+                            .report_cannot_find_type(t.location(), name);
                         TypeId::ERROR
                     }
                 }

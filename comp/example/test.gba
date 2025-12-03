@@ -22,4 +22,8 @@ struct Pos {
     y: u32,
 }
 
-const l = Pos { x: 5, y: 3 };
+struct A {
+    foo: ptr,
+}
+
+// const l = Pos { x: 5, y: 3 };
