@@ -249,7 +249,7 @@ impl Lexer {
                     // TODO: Do not loose comments in the future!
                     lex_state = LexState::Init;
                 }
-                (LexState::Comment, Some(ch)) => {
+                (LexState::Comment, Some(_)) => {
                     location.span.start = self.position;
                     self.position += 1;
                 }

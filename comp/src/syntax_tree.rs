@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+use crate::bind::conversion::ConversionKind;
 use crate::bind::{BoundBinaryOperator, VariableId};
 use crate::{BoundId, HasLocation, Location, lexer::Token, typing::TypeId, value::Value};
 use std::fmt::Debug;
@@ -334,6 +335,27 @@ impl SyntaxNode<Bound> {
             },
         }
     }
+
+    pub(crate) fn conversion(
+        location: Location,
+        base: BoundId,
+        expected: TypeId,
+        conversion_kind: ConversionKind,
+        id: BoundId,
+    ) -> SyntaxNode<Bound> {
+        Self {
+            location,
+            kind: SyntaxNodeKind::Conversion(ConversionNode {
+                base,
+                conversion_kind,
+            }),
+            stage: Bound {
+                id,
+                type_: expected,
+                constant_value: None,
+            },
+        }
+    }
 }
 
 fn to_option(value: bool) -> Option<()> {
@@ -558,6 +580,13 @@ pub enum SyntaxNodeKind<S: Stage> {
     FunctionDeclaration(FunctionDeclarationNode<S>),
     FunctionCall(FunctionCallNode<S>),
     AssignmentStatement(AssignmentStatementNode<S>),
+    Conversion(ConversionNode<S>),
+}
+
+#[derive(Debug, Clone)]
+pub struct ConversionNode<S: Stage> {
+    base: S::ChildNodeBoxed,
+    conversion_kind: ConversionKind,
 }
 
 #[derive(Debug, Clone)]

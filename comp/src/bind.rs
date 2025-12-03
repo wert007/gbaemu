@@ -1,7 +1,11 @@
+pub mod conversion;
+
 use std::{collections::HashMap, ops::Index};
 
 use crate::{
-    BoundId, Compiler, HasLocation, Location, SourceTextId, StringId, const_evaluator,
+    BoundId, Compiler, HasLocation, Location, SourceTextId, StringId,
+    bind::conversion::ConversionKind,
+    const_evaluator,
     lexer::{Token, TokenKind},
     parser::Parser,
     syntax_tree::*,
@@ -16,6 +20,38 @@ pub enum BoundBinaryOperator {
     Multiplication,
     Division,
     Modulo,
+}
+impl BoundBinaryOperator {
+    pub fn diagnostic_name(&self) -> &'static str {
+        match self {
+            BoundBinaryOperator::Addition => "add",
+            BoundBinaryOperator::Subtraction => "subtract",
+            BoundBinaryOperator::Multiplication => "multiply",
+            BoundBinaryOperator::Division => "divide",
+            BoundBinaryOperator::Modulo => "take the remainder",
+        }
+    }
+    #[rustfmt::skip]
+    fn resolve_types(
+        &self,
+        lhs_id: TypeId,
+        rhs_id: TypeId,
+        types: &mut Types,
+    ) -> (TypeId, TypeId, TypeId) {
+        let lhs = &types[lhs_id];
+        let rhs = &types[rhs_id];
+        match (lhs, rhs, self) {
+            (Type::UnsignedInteger8, _, Self::Addition | Self::Subtraction | Self::Multiplication | Self::Division | Self::Modulo) |
+            (Type::UnsignedInteger16, _, Self::Addition | Self::Subtraction | Self::Multiplication | Self::Division | Self::Modulo) |
+            (Type::UnsignedInteger32, _, Self::Addition | Self::Subtraction | Self::Multiplication | Self::Division | Self::Modulo)
+            => (lhs_id, lhs_id, lhs_id),
+            (_, Type::UnsignedInteger8, Self::Addition | Self::Subtraction | Self::Multiplication | Self::Division | Self::Modulo) |
+            (_, Type::UnsignedInteger16, Self::Addition | Self::Subtraction | Self::Multiplication | Self::Division | Self::Modulo) |
+            (_, Type::UnsignedInteger32, Self::Addition | Self::Subtraction | Self::Multiplication | Self::Division | Self::Modulo)
+            => (rhs_id, rhs_id, rhs_id),
+            _ => (lhs_id, rhs_id, TypeId::ERROR)
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -169,11 +205,14 @@ impl Binder {
                     compiler,
                     id,
                 ),
+            SyntaxNodeKind::Conversion(_conversion_node) => {
+                todo!("These are not created yet during parsing")
+            }
         };
         unsafe {
             compiler.nodes.set(id, node);
         }
-        id
+        self.bind_conversion(id, expected, compiler, ConversionKind::Implicit)
     }
 
     fn bind_node(
@@ -197,13 +236,52 @@ impl Binder {
             TokenKind::Error => SyntaxNode::<Bound>::error(token.location(), id),
             TokenKind::Integer => {
                 assert!(expected == TypeId::UNKNOWN || expected == TypeId::UNSIGNED_INTEGER_32);
-                let value = compiler[token.location()].parse().expect("Error handling!");
-                SyntaxNode::<Bound>::literal(
-                    token,
-                    Value::UnsignedInteger32(value),
-                    TypeId::UNSIGNED_INTEGER_32,
-                    id,
-                )
+                let lexeme = &compiler[token.location()];
+                let (value, type_) = match expected {
+                    TypeId::UNSIGNED_INTEGER_8 => {
+                        let expected = TypeId::UNSIGNED_INTEGER_8;
+                        let value = lexeme
+                            .parse::<u8>()
+                            .map(|v| Value::UnsignedInteger8(v))
+                            .unwrap_or_else(|_| {
+                                compiler.diagnostics.report_cannot_parse_integer_literal_to(
+                                    token.location(),
+                                    expected,
+                                );
+                                Value::Error
+                            });
+                        (value, expected)
+                    }
+                    TypeId::UNSIGNED_INTEGER_16 => {
+                        let expected = TypeId::UNSIGNED_INTEGER_16;
+                        let value = lexeme
+                            .parse::<u16>()
+                            .map(|v| Value::UnsignedInteger16(v))
+                            .unwrap_or_else(|_| {
+                                compiler.diagnostics.report_cannot_parse_integer_literal_to(
+                                    token.location(),
+                                    expected,
+                                );
+                                Value::Error
+                            });
+                        (value, expected)
+                    }
+                    TypeId::UNSIGNED_INTEGER_32 | TypeId::UNKNOWN | _ => {
+                        let expected = TypeId::UNSIGNED_INTEGER_32;
+                        let value = lexeme
+                            .parse::<u32>()
+                            .map(|v| Value::UnsignedInteger32(v))
+                            .unwrap_or_else(|_| {
+                                compiler.diagnostics.report_cannot_parse_integer_literal_to(
+                                    token.location(),
+                                    expected,
+                                );
+                                Value::Error
+                            });
+                        (value, expected)
+                    }
+                };
+                SyntaxNode::<Bound>::literal(token, value, type_, id)
             }
             TokenKind::FalseKeyword | TokenKind::TrueKeyword => {
                 assert!(expected == TypeId::UNKNOWN || expected == TypeId::BOOL);
@@ -212,6 +290,35 @@ impl Binder {
             }
             unexpected => todo!("Unexpected literal {unexpected:#?}!"),
         }
+    }
+
+    fn bind_conversion(
+        &mut self,
+        base_id: BoundId,
+        expected: TypeId,
+        compiler: &mut Compiler,
+        conversion_kind: ConversionKind,
+    ) -> BoundId {
+        let base_type = compiler.nodes.type_of(base_id);
+        let location = compiler.nodes.location_of(base_id);
+        if base_type == expected
+            || base_type == TypeId::ERROR
+            || expected == TypeId::UNKNOWN
+            || expected == TypeId::ERROR
+        {
+            return base_id;
+        }
+        let id = unsafe { compiler.nodes.prepare_id() };
+        let node = if conversion_kind.convert(base_type, expected, &mut self.types) {
+            SyntaxNode::<Bound>::conversion(location, base_id, expected, conversion_kind, id)
+        } else {
+            compiler
+                .diagnostics
+                .report_cannot_convert(location, base_type, expected);
+            SyntaxNode::<Bound>::error(location, id)
+        };
+        unsafe { compiler.nodes.set(id, node) };
+        id
     }
 
     fn bind_identifier(
@@ -329,7 +436,19 @@ impl Binder {
             TokenKind::Percent => BoundBinaryOperator::Modulo,
             _ => unreachable!("Compiler error!"),
         };
-        SyntaxNode::<Bound>::binary(location, lhs, op, rhs, TypeId::UNSIGNED_INTEGER_32, id)
+        let (lhs_type, rhs_type, return_type) = op.resolve_types(
+            compiler.nodes.type_of(lhs),
+            compiler.nodes.type_of(rhs),
+            &mut self.types,
+        );
+        let lhs = self.bind_conversion(lhs, lhs_type, compiler, ConversionKind::Implicit);
+        let rhs = self.bind_conversion(rhs, rhs_type, compiler, ConversionKind::Implicit);
+        if lhs_type != TypeId::ERROR && rhs_type != TypeId::ERROR && return_type == TypeId::ERROR {
+            compiler
+                .diagnostics
+                .report_invalid_binary_operation(location, lhs_type, op, rhs_type)
+        }
+        SyntaxNode::<Bound>::binary(location, lhs, op, rhs, return_type, id)
     }
 
     fn look_up_variable_by_name(&self, name: StringId) -> Option<&VariableDeclaration> {

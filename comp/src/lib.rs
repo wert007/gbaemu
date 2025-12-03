@@ -315,6 +315,35 @@ impl Diagnostic {
             message: "The value cannot be computed at compile time and can therefore not be used in a const declaration.".into()
         }
     }
+
+    fn cannot_parse_integer_literal_to(
+        location: Location,
+        _expected: typing::TypeId,
+    ) -> Diagnostic {
+        Self {
+            location,
+            message: "Value is not a valid representation for this integer".into(),
+        }
+    }
+
+    fn cannot_convert(location: Location, from: typing::TypeId, to: typing::TypeId) -> Diagnostic {
+        Self {
+            location,
+            message: "Cannot implicitly convert between those types!".into(),
+        }
+    }
+
+    fn invalid_binary_operation(
+        location: Location,
+        lhs_type: typing::TypeId,
+        op: bind::BoundBinaryOperator,
+        rhs_type: typing::TypeId,
+    ) -> Diagnostic {
+        Self {
+            location,
+            message: format!("Cannot {} those types.", op.diagnostic_name()).into(),
+        }
+    }
 }
 
 pub struct Diagnostics {
@@ -414,6 +443,39 @@ impl Diagnostics {
             )?;
         }
         Ok(())
+    }
+
+    fn report_cannot_parse_integer_literal_to(
+        &mut self,
+        location: Location,
+        expected: typing::TypeId,
+    ) {
+        self.diagnostics
+            .push(Diagnostic::cannot_parse_integer_literal_to(
+                location, expected,
+            ));
+    }
+
+    fn report_cannot_convert(
+        &mut self,
+        location: Location,
+        from: typing::TypeId,
+        to: typing::TypeId,
+    ) {
+        self.diagnostics
+            .push(Diagnostic::cannot_convert(location, from, to));
+    }
+
+    fn report_invalid_binary_operation(
+        &mut self,
+        location: Location,
+        lhs_type: typing::TypeId,
+        op: bind::BoundBinaryOperator,
+        rhs_type: typing::TypeId,
+    ) {
+        self.diagnostics.push(Diagnostic::invalid_binary_operation(
+            location, lhs_type, op, rhs_type,
+        ));
     }
 }
 
@@ -575,6 +637,9 @@ impl BoundTree {
 
     fn type_of(&self, id: BoundId) -> typing::TypeId {
         self[id].stage.type_
+    }
+    fn location_of(&self, id: BoundId) -> Location {
+        self[id].location()
     }
 }
 
