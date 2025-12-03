@@ -188,7 +188,7 @@ impl Location {
     }
 }
 
-trait HasLocation {
+pub trait HasLocation {
     fn location(&self) -> Location;
 }
 

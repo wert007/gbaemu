@@ -43,6 +43,10 @@ impl Token {
         }
     }
 
+    fn multi_char(location: Location, cur: &[char]) -> Token {
+        todo!()
+    }
+
     fn integer(location: Location) -> Token {
         Self {
             location,
@@ -165,6 +169,8 @@ impl Lexer {
             Init,
             Identifier,
             Integer,
+            Comment,
+            MultiCharStart(char),
             // Done(Option<Token>),
         }
         let mut lex_state = LexState::Init;
@@ -213,13 +219,39 @@ impl Lexer {
                     let lexeme = &compiler[location];
                     break Some(Token::identifier(location, lexeme));
                 }
-                (LexState::Init, Some(ch)) => {
+                (LexState::Init, next @ Some(ch)) | (LexState::MultiCharStart(ch), next @ None) => {
+                    if next.is_none() || followed_by(ch).is_empty() {
+                        let location = location.with_end_at(self.position);
+                        let token = Token::char(location, ch);
+                        if token.kind == TokenKind::Error {
+                            compiler.diagnostics.report_invalid_char(location, ch);
+                        }
+                        break Some(token);
+                    } else {
+                        lex_state = LexState::MultiCharStart(ch);
+                        self.position += 1;
+                    }
+                }
+                (LexState::MultiCharStart(prev), Some(cur)) => {
+                    self.position += 1;
+                    if prev == '/' && cur == '/' {
+                        lex_state = LexState::Comment;
+                        continue;
+                    }
                     let location = location.with_end_at(self.position);
-                    let token = Token::char(location, ch);
+                    let token = Token::multi_char(location, &[prev, cur]);
                     if token.kind == TokenKind::Error {
-                        compiler.diagnostics.report_invalid_char(location, ch);
+                        compiler.diagnostics.report_invalid_char(location, cur);
                     }
                     break Some(token);
+                }
+                (LexState::Comment, None | Some('\n')) => {
+                    // TODO: Do not loose comments in the future!
+                    lex_state = LexState::Init;
+                }
+                (LexState::Comment, Some(ch)) => {
+                    location.span.start = self.position;
+                    self.position += 1;
                 }
             }
         };
@@ -229,5 +261,12 @@ impl Lexer {
 
     pub(crate) fn position(&self) -> usize {
         self.position
+    }
+}
+
+fn followed_by(ch: char) -> &'static [char] {
+    match ch {
+        '/' => &['/'],
+        _ => &[],
     }
 }
