@@ -1,5 +1,5 @@
 const a = 2;
-const b = 5;
+const a = 5;
 const c = a + b;
 const d = true;
 const f = [1, 2, 3, 4];

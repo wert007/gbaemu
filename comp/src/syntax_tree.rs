@@ -50,6 +50,7 @@ impl Stage for Bound {
 
 #[derive(Debug, Clone)]
 pub enum TypeIdentifier {
+    Error(Location),
     Named(Token),
     Array(ArrayTypeIdentifier),
 }
@@ -57,6 +58,7 @@ pub enum TypeIdentifier {
 impl HasLocation for TypeIdentifier {
     fn location(&self) -> Location {
         match self {
+            TypeIdentifier::Error(location) => *location,
             TypeIdentifier::Named(token) => token.location(),
             TypeIdentifier::Array(array_type_identifier) => array_type_identifier
                 .lbracket
@@ -130,7 +132,7 @@ impl SyntaxNode<Bound> {
             stage: Bound {
                 id,
                 type_: TypeId::ERROR,
-                constant_value: None,
+                constant_value: Some(Value::Error),
             },
         }
     }
@@ -339,6 +341,14 @@ fn to_option(value: bool) -> Option<()> {
 }
 
 impl SyntaxNode<Parsed> {
+    pub fn error(location: Location) -> Self {
+        Self {
+            location,
+            kind: SyntaxNodeKind::Error,
+            stage: Parsed,
+        }
+    }
+
     pub fn program(top_level_statements: Vec<SyntaxNode<Parsed>>, eof: Token) -> Self {
         let location = eof
             .location()

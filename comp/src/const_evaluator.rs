@@ -137,8 +137,12 @@ fn evaluate_function_call(
         .map(|a| evaluate_expression(a, compiler, evaluator))
         .collect();
     let arguments = arguments?;
-    assert_eq!(arguments.len(), 0);
-    evaluate_expression(base.as_bound_id().unwrap(), compiler, evaluator)
+    if base.is_error() || arguments.iter().any(|v| v.is_error()) {
+        Some(Value::Error)
+    } else {
+        assert_eq!(arguments.len(), 0);
+        evaluate_expression(base.as_bound_id().unwrap(), compiler, evaluator)
+    }
 }
 
 fn evaluate_array_literal(
@@ -153,7 +157,11 @@ fn evaluate_array_literal(
         .map(|e| evaluate_expression(e, compiler, evaluator))
         .collect();
     let entries = entries?;
-    Some(Value::Array(entries))
+    if entries.iter().any(|v| v.is_error()) {
+        Some(Value::Error)
+    } else {
+        Some(Value::Array(entries))
+    }
 }
 
 fn evaluate_binary(
@@ -163,6 +171,9 @@ fn evaluate_binary(
 ) -> Option<Value> {
     let lhs = evaluate_expression(binary_node.lhs, compiler, evaluator)?;
     let rhs = evaluate_expression(binary_node.rhs, compiler, evaluator)?;
+    if lhs.is_error() || rhs.is_error() {
+        return Some(Value::Error);
+    }
     Some(match binary_node.op {
         crate::bind::BoundBinaryOperator::Addition => {
             Value::UnsignedInteger32(lhs.as_u32()?.wrapping_add(rhs.as_u32()?))

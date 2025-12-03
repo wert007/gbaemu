@@ -77,6 +77,10 @@ impl Compiler {
     pub fn intern_location(&mut self, location: Location) -> StringId {
         self.strings.intern(&self.files[location])
     }
+
+    pub fn write_diagnostics(&self, out: &mut impl std::io::Write) -> std::io::Result<()> {
+        self.diagnostics.write_to(out, &self.files)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -190,6 +194,17 @@ trait HasLocation {
 
 pub struct DiagnosticMessage(String);
 
+impl From<&str> for DiagnosticMessage {
+    fn from(value: &str) -> Self {
+        Self(value.into())
+    }
+}
+impl From<String> for DiagnosticMessage {
+    fn from(value: String) -> Self {
+        Self(value.into())
+    }
+}
+
 pub struct Diagnostic {
     location: Location,
     message: DiagnosticMessage,
@@ -198,7 +213,106 @@ impl Diagnostic {
     fn invalid_char(location: Location, ch: char) -> Diagnostic {
         Self {
             location,
-            message: DiagnosticMessage(format!("Unexpected char {ch} in input!")),
+            message: format!("Unexpected char {ch} in input!").into(),
+        }
+    }
+
+    fn missing_comma(location: Location) -> Diagnostic {
+        Self {
+            location,
+            message: "There is a comma missing here.".into(),
+        }
+    }
+
+    fn cannot_declare_type_generics_as_out(location: Location) -> Diagnostic {
+        Self {
+            location,
+            message: "Generic cannot be marked as out, since it has no type set.".into(),
+        }
+    }
+
+    fn cannot_use_reserved_keyword(location: Location, keyword: &str) -> Diagnostic {
+        Self {
+            location,
+            message: format!("Cannot use keyword `{keyword}` here.").into(),
+        }
+    }
+
+    fn invalid_top_level_statement(location: Location, found: lexer::TokenKind) -> Diagnostic {
+        Self {
+            location,
+            message: format!(
+                "Only const declarations and function definitions are valid here. Found a/an {} instead.",
+                found.diagnostic_name()
+            ).into()
+        }
+    }
+
+    fn cannot_parse_as_expression(location: Location, unexpected: lexer::TokenKind) -> Diagnostic {
+        Self {
+            location,
+            message: format!(
+                "Cannot parse a/an {} as an expression.",
+                unexpected.diagnostic_name()
+            )
+            .into(),
+        }
+    }
+
+    fn invalid_type_identifier_format(
+        location: Location,
+        unexpected: lexer::TokenKind,
+    ) -> Diagnostic {
+        Self {
+            location,
+            message: format!(
+                "Type identifiers must be either written as `typeName` or as `[typeName; NUMBER]`, found a/an {} instead.",
+                unexpected.diagnostic_name()
+            ).into(),
+        }
+    }
+
+    fn cannot_find_type(location: Location) -> Diagnostic {
+        Self {
+            location,
+            message: "No type by this name could be found.".into(),
+        }
+    }
+
+    fn non_const_value_in_type(location: Location) -> Diagnostic {
+        Self {
+            location,
+            message: "Expression did not evaluate at compile time. Is it not const?".into(),
+        }
+    }
+
+    fn cannot_find_variable_by_name(location: Location) -> Diagnostic {
+        Self {
+            location,
+            message: "No variable by this name could be found.".into(),
+        }
+    }
+
+    fn cannot_redeclare_variable(location: Location) -> Diagnostic {
+        Self {
+            location,
+            message:
+                "Variable with this name has been already declared and cannot be declared again."
+                    .into(),
+        }
+    }
+
+    fn previous_declaration_at(location: Location) -> Diagnostic {
+        Self {
+            location,
+            message: "The previous conflicting declaration was here.".into(),
+        }
+    }
+
+    fn non_const_value_in_const_declaration(location: Location) -> Diagnostic {
+        Self {
+            location,
+            message: "The value cannot be computed at compile time and can therefore not be used in a const declaration.".into()
         }
     }
 }
@@ -216,6 +330,90 @@ impl Diagnostics {
     fn report_invalid_char(&mut self, location: Location, ch: char) {
         self.diagnostics
             .push(Diagnostic::invalid_char(location, ch));
+    }
+
+    fn report_missing_comma(&mut self, location: Location) {
+        self.diagnostics.push(Diagnostic::missing_comma(location));
+    }
+
+    fn report_cannot_declare_type_generics_as_out(&mut self, location: Location) {
+        self.diagnostics
+            .push(Diagnostic::cannot_declare_type_generics_as_out(location));
+    }
+
+    fn report_cannot_use_reserved_keyword(&mut self, location: Location, keyword: &str) {
+        self.diagnostics
+            .push(Diagnostic::cannot_use_reserved_keyword(location, keyword));
+    }
+
+    fn report_invalid_top_level_statement(&mut self, location: Location, found: lexer::TokenKind) {
+        self.diagnostics
+            .push(Diagnostic::invalid_top_level_statement(location, found));
+    }
+
+    fn report_cannot_parse_as_expression(
+        &mut self,
+        location: Location,
+        unexpected: lexer::TokenKind,
+    ) {
+        self.diagnostics
+            .push(Diagnostic::cannot_parse_as_expression(location, unexpected));
+    }
+
+    fn report_invalid_type_identifier_format(
+        &mut self,
+        location: Location,
+        unexpected: lexer::TokenKind,
+    ) {
+        self.diagnostics
+            .push(Diagnostic::invalid_type_identifier_format(
+                location, unexpected,
+            ));
+    }
+
+    fn report_cannot_find_type(&mut self, location: Location) {
+        self.diagnostics
+            .push(Diagnostic::cannot_find_type(location))
+    }
+
+    fn report_non_const_value_in_type(&mut self, location: Location) {
+        self.diagnostics
+            .push(Diagnostic::non_const_value_in_type(location));
+    }
+
+    fn report_non_const_value_in_const_declaration(&mut self, location: Location) {
+        self.diagnostics
+            .push(Diagnostic::non_const_value_in_const_declaration(location));
+    }
+
+    fn report_cannot_find_variable_by_name(&mut self, location: Location) {
+        self.diagnostics
+            .push(Diagnostic::cannot_find_variable_by_name(location));
+    }
+
+    fn report_cannot_redeclare_variable(&mut self, location: Location, previous: Location) {
+        self.diagnostics
+            .push(Diagnostic::cannot_redeclare_variable(location));
+        self.diagnostics
+            .push(Diagnostic::previous_declaration_at(previous));
+    }
+
+    fn write_to(
+        &self,
+        out: &mut impl std::io::Write,
+        files: &SourceText,
+    ) -> Result<(), std::io::Error> {
+        for diagnostic in &self.diagnostics {
+            writeln!(
+                out,
+                "[{}:{}:{}] {}",
+                files.file_name(diagnostic.location),
+                files.line_number(diagnostic.location),
+                files.column(diagnostic.location),
+                diagnostic.message.0
+            )?;
+        }
+        Ok(())
     }
 }
 
@@ -252,6 +450,18 @@ impl SourceText {
         self.files.push(SourceTextFile::from_file(path)?);
         Ok(id)
     }
+
+    pub fn file_name(&self, location: Location) -> &str {
+        &self[location.file].file_name
+    }
+
+    pub fn line_number(&self, location: Location) -> usize {
+        self[location.file].line_number(location.span.start)
+    }
+
+    pub fn column(&self, location: Location) -> usize {
+        self[location.file].column(location.span.start)
+    }
 }
 
 pub struct SourceTextFile {
@@ -282,6 +492,7 @@ impl SourceTextFile {
 
     fn collect_line_starts(content: &str) -> Vec<usize> {
         let mut line_starts = Vec::new();
+        line_starts.push(0);
         for (i, ch) in content.char_indices() {
             match ch {
                 '\n' => {
@@ -295,6 +506,18 @@ impl SourceTextFile {
 
     pub fn len(&self) -> usize {
         self.content.len()
+    }
+
+    fn line_number(&self, offset: usize) -> usize {
+        match self.line_starts.binary_search(&offset) {
+            Ok(it) => it + 1,
+            Err(it) => it,
+        }
+    }
+
+    fn column(&self, offset: usize) -> usize {
+        let line_number = self.line_number(offset);
+        offset - self.line_starts[line_number - 1]
     }
 }
 

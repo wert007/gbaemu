@@ -2,6 +2,7 @@ use crate::BoundId;
 
 #[derive(Debug, Clone)]
 pub enum Value {
+    Error,
     UnsignedInteger8(u8),
     UnsignedInteger16(u16),
     UnsignedInteger32(u32),
@@ -32,5 +33,9 @@ impl Value {
             Value::UnsignedInteger32(i) => Some(*i as usize),
             _ => None,
         }
+    }
+
+    pub(crate) fn is_error(&self) -> bool {
+        matches!(self, Value::Error)
     }
 }

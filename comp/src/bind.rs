@@ -20,9 +20,16 @@ pub enum BoundBinaryOperator {
 
 #[derive(Debug)]
 pub struct VariableDeclaration {
+    pub location: Location,
     pub id: VariableId,
     pub name: StringId,
     pub type_: TypeId,
+}
+
+impl HasLocation for VariableDeclaration {
+    fn location(&self) -> Location {
+        self.location
+    }
 }
 
 #[derive(Debug)]
@@ -39,13 +46,19 @@ impl Variables {
         }
     }
 
-    pub fn register(&mut self, name: StringId, type_: TypeId) -> Option<VariableId> {
+    pub fn register(
+        &mut self,
+        location: Location,
+        name: StringId,
+        type_: TypeId,
+    ) -> Option<VariableId> {
         let scope_start = self.scopes.last().copied().unwrap_or_default();
         if self.variables[scope_start..].iter().any(|v| v.name == name) {
             None
         } else {
             let index = self.variables.len();
             self.variables.push(VariableDeclaration {
+                location,
                 id: VariableId(index),
                 name,
                 type_,
@@ -106,7 +119,7 @@ impl Binder {
         let node = match node.kind {
             SyntaxNodeKind::Error => {
                 dbg!();
-                SyntaxNode::error(node.location(), id)
+                SyntaxNode::<Bound>::error(node.location(), id)
             }
             SyntaxNodeKind::Program(program_node) => {
                 self.bind_program(program_node, expected, location, compiler, id)
@@ -181,7 +194,7 @@ impl Binder {
         id: BoundId,
     ) -> SyntaxNode<Bound> {
         match token.kind {
-            TokenKind::Error => SyntaxNode::error(token.location(), id),
+            TokenKind::Error => SyntaxNode::<Bound>::error(token.location(), id),
             TokenKind::Integer => {
                 assert!(expected == TypeId::UNKNOWN || expected == TypeId::UNSIGNED_INTEGER_32);
                 let value = compiler[token.location()].parse().expect("Error handling!");
@@ -197,7 +210,7 @@ impl Binder {
                 let value = token.kind == TokenKind::TrueKeyword;
                 SyntaxNode::<Bound>::literal(token, Value::Bool(value), TypeId::BOOL, id)
             }
-            _ => todo!("Parse error!"),
+            unexpected => todo!("Unexpected literal {unexpected:#?}!"),
         }
     }
 
@@ -223,7 +236,10 @@ impl Binder {
                 id,
             )
         } else {
-            todo!("Error handling!")
+            compiler
+                .diagnostics
+                .report_cannot_find_variable_by_name(token.location());
+            SyntaxNode::<Bound>::error(token.location(), id)
         }
     }
 
@@ -236,24 +252,41 @@ impl Binder {
         id: BoundId,
     ) -> SyntaxNode<Bound> {
         assert_eq!(expected, TypeId::VOID);
+        let expression_location = const_declaration_node.expr.location();
         let expression = self.bind_node(*const_declaration_node.expr, TypeId::UNKNOWN, compiler);
         // let variable = &compiler[];
-        let variable = compiler.intern_location(const_declaration_node.identifier.location());
+        let variable_location = const_declaration_node.identifier.location();
+        let variable = compiler.intern_location(variable_location);
 
         let type_ = compiler.nodes.type_of(expression);
-        let Some(variable) = self.register_variable(variable, type_) else {
+        let Some(variable) = self.register_variable(variable_location, variable, type_) else {
+            let previous = self
+                .look_up_variable_by_name(variable)
+                .expect("should exist at this point");
+            compiler.diagnostics.report_cannot_redeclare_variable(
+                const_declaration_node.identifier.location(),
+                previous.location(),
+            );
             dbg!("Failed registering variable");
-            return SyntaxNode::error(const_declaration_node.identifier.location(), id);
+            return SyntaxNode::<Bound>::error(const_declaration_node.identifier.location(), id);
         };
-        let value = const_evaluator::evaluate(expression, compiler).expect("Is constant?");
+        let value = const_evaluator::evaluate(expression, compiler).unwrap_or_else(|| {
+            compiler
+                .diagnostics
+                .report_non_const_value_in_const_declaration(expression_location);
+            Value::Error
+        });
         self.register_constant(variable, value.clone());
-        // todo!();
         SyntaxNode::<Bound>::const_declaration(location, variable, value, id)
-        // SyntaxNode::<Bound>::const_declaration(variable, expression)
     }
 
-    fn register_variable(&mut self, variable_name: StringId, type_: TypeId) -> Option<VariableId> {
-        self.variables.register(variable_name, type_)
+    fn register_variable(
+        &mut self,
+        location: Location,
+        variable_name: StringId,
+        type_: TypeId,
+    ) -> Option<VariableId> {
+        self.variables.register(location, variable_name, type_)
     }
 
     fn register_constant(&mut self, variable: VariableId, value: Value) {
@@ -291,7 +324,7 @@ impl Binder {
         let op = match binary_node.op.kind {
             TokenKind::Plus => BoundBinaryOperator::Addition,
             TokenKind::Minus => BoundBinaryOperator::Subtraction,
-            TokenKind::Star => BoundBinaryOperator::Multiplication,
+            TokenKind::Asterisk => BoundBinaryOperator::Multiplication,
             TokenKind::Slash => BoundBinaryOperator::Division,
             TokenKind::Percent => BoundBinaryOperator::Modulo,
             _ => unreachable!("Compiler error!"),
@@ -387,7 +420,8 @@ impl Binder {
         id: BoundId,
     ) -> SyntaxNode<Bound> {
         let is_comp = function_declaration_node.comp_keyword.is_some();
-        let identifier = compiler.intern_location(function_declaration_node.identifier.location());
+        let identifier_location = function_declaration_node.identifier.location();
+        let identifier = compiler.intern_location(identifier_location);
         let generic_parameters: Vec<(Location, StringId, TypeId)> = function_declaration_node
             .head
             .generics
@@ -400,8 +434,7 @@ impl Binder {
                             Some((
                                 p.location,
                                 compiler.intern_location(p.identifier.location()),
-                                self.bind_type_identifier(t.clone(), compiler)
-                                    .expect("Type exists"),
+                                self.bind_type_identifier(t.clone(), compiler),
                             ))
                         } else {
                             None
@@ -446,7 +479,7 @@ impl Binder {
             let parameters = parameters_bound
                 .iter()
                 .map(|&(l, n, t)| {
-                    let n = b.register_variable(n, t).expect("No failure!");
+                    let n = b.register_variable(l, n, t).expect("No failure!");
                     ParameterNode::<Bound>::new(l, n, t)
                 })
                 .collect();
@@ -456,10 +489,7 @@ impl Binder {
         let return_type = function_declaration_node
             .head
             .return_type
-            .map(|(_, t)| {
-                self.bind_type_identifier(t, compiler)
-                    .expect("Did not find type!")
-            })
+            .map(|(_, t)| self.bind_type_identifier(t, compiler))
             .unwrap_or(TypeId::VOID);
         let type_ = Type::FunctionType(
             parameters_bound.iter().map(|(.., t)| *t).collect(),
@@ -467,7 +497,7 @@ impl Binder {
         );
         let type_ = self.register_type(type_);
         let identifier = self
-            .register_variable(identifier, type_)
+            .register_variable(identifier_location, identifier, type_)
             .expect("no duplicate!");
 
         self.register_constant(identifier, Value::CompileTimeFunction(body));
@@ -484,27 +514,37 @@ impl Binder {
         )
     }
 
-    fn bind_type_identifier(
-        &mut self,
-        t: TypeIdentifier,
-        compiler: &mut Compiler,
-    ) -> Option<TypeId> {
+    fn bind_type_identifier(&mut self, t: TypeIdentifier, compiler: &mut Compiler) -> TypeId {
         match t {
+            TypeIdentifier::Error(_) => TypeId::ERROR,
             TypeIdentifier::Named(name) => {
                 let name = compiler.intern_location(name.location());
-                self.types.find_by_name(name)
+                match self.types.find_by_name(name) {
+                    Some(it) => it,
+                    None => {
+                        compiler.diagnostics.report_cannot_find_type(t.location());
+                        TypeId::ERROR
+                    }
+                }
             }
             TypeIdentifier::Array(array_type_identifier) => {
+                let length_location = array_type_identifier.length.location();
                 let length = self.bind_node(
                     *array_type_identifier.length,
                     TypeId::UNSIGNED_INTEGER_16,
                     compiler,
                 );
-                let length =
-                    const_evaluator::evaluate(length, compiler).expect("Should be constant!");
-                let length = length.as_usize().expect("Should be int");
-                let inner = self.bind_type_identifier(*array_type_identifier.type_, compiler)?;
-                Some(self.types.register(Type::Array(inner, length as _)))
+                let inner = self.bind_type_identifier(*array_type_identifier.type_, compiler);
+                let Some(length) = const_evaluator::evaluate(length, compiler) else {
+                    compiler
+                        .diagnostics
+                        .report_non_const_value_in_type(length_location);
+                    return TypeId::ERROR;
+                };
+                let Some(length) = length.as_usize() else {
+                    return TypeId::ERROR;
+                };
+                self.types.register(Type::Array(inner, length as _))
             }
         }
     }
@@ -516,7 +556,7 @@ impl Binder {
     ) -> (Location, StringId, TypeId) {
         let location = p.location;
         let name = compiler.intern_location(p.identifier.location());
-        let type_ = self.bind_type_identifier(p.type_, compiler).expect("Type!");
+        let type_ = self.bind_type_identifier(p.type_, compiler);
         (location, name, type_)
     }
 
@@ -574,12 +614,10 @@ impl Binder {
     ) -> GenericParameterNode<Bound> {
         let is_out = p.out.is_some();
         let identifier = compiler.intern_location(p.identifier.location());
-        let type_ = p
-            .type_
-            .map(|(_, t)| self.bind_type_identifier(t, compiler).expect("Valid type!"));
+        let type_ = p.type_.map(|(_, t)| self.bind_type_identifier(t, compiler));
         let identifier_type = type_.unwrap_or(TypeId::TYPE);
         let identifier = self
-            .register_variable(identifier, identifier_type)
+            .register_variable(p.identifier.location(), identifier, identifier_type)
             .expect("Success");
         if is_out {
             assert!(type_.is_some());

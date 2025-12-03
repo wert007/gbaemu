@@ -22,7 +22,7 @@ impl Token {
             ';' => TokenKind::Semicolon,
             '+' => TokenKind::Plus,
             '-' => TokenKind::Minus,
-            '*' => TokenKind::Star,
+            '*' => TokenKind::Asterisk,
             '/' => TokenKind::Slash,
             '%' => TokenKind::Percent,
             '{' => TokenKind::LBrace,
@@ -87,7 +87,7 @@ pub enum TokenKind {
     Equals,
     Plus,
     Minus,
-    Star,
+    Asterisk,
     Slash,
     Percent,
     Semicolon,
@@ -110,11 +110,42 @@ impl TokenKind {
         Some(match self {
             TokenKind::Plus => (10, 20),
             TokenKind::Minus => (10, 20),
-            TokenKind::Star => (30, 40),
+            TokenKind::Asterisk => (30, 40),
             TokenKind::Slash => (30, 40),
             TokenKind::Percent => (30, 40),
             _ => return None,
         })
+    }
+
+    pub fn diagnostic_name(&self) -> &'static str {
+        match self {
+            TokenKind::Eof => "end of file",
+            TokenKind::Error => "invalid character",
+            TokenKind::ConstKeyword => "const keyword",
+            TokenKind::TrueKeyword => "true keyword",
+            TokenKind::FalseKeyword => "false keyword",
+            TokenKind::Identifier => "identifier",
+            TokenKind::Equals => "=",
+            TokenKind::Plus => "+",
+            TokenKind::Minus => "-",
+            TokenKind::Asterisk => "*",
+            TokenKind::Slash => "/",
+            TokenKind::Percent => "%",
+            TokenKind::Semicolon => ";",
+            TokenKind::Integer => "integer",
+            TokenKind::LBracket => "[",
+            TokenKind::RBracket => "]",
+            TokenKind::Comma => ",",
+            TokenKind::Colon => ":",
+            TokenKind::LParen => "(",
+            TokenKind::RParen => ")",
+            TokenKind::CompKeyword => "comp keyword",
+            TokenKind::FnKeyword => "fn keyword",
+            TokenKind::LBrace => "{",
+            TokenKind::RBrace => "}",
+            TokenKind::LessThan => "<",
+            TokenKind::GreaterThan => ">",
+        }
     }
 }
 
@@ -159,10 +190,6 @@ impl Lexer {
                 (LexState::Init, None) => {
                     break Some(Token::char(location.with_end_at(self.position), '\0'));
                 }
-                (LexState::Init, Some(ch @ ('=' | ';'))) => {
-                    break Some(Token::char(location.with_end_at(self.position), ch));
-                }
-
                 (LexState::Init, Some(' ' | '\n' | '\t' | '\r')) => {
                     self.position += 1;
                     location.span.start += 1;
@@ -188,8 +215,11 @@ impl Lexer {
                 }
                 (LexState::Init, Some(ch)) => {
                     let location = location.with_end_at(self.position);
-                    compiler.diagnostics.report_invalid_char(location, ch);
-                    break Some(Token::char(location, ch));
+                    let token = Token::char(location, ch);
+                    if token.kind == TokenKind::Error {
+                        compiler.diagnostics.report_invalid_char(location, ch);
+                    }
+                    break Some(token);
                 }
             }
         };

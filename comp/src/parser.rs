@@ -103,7 +103,14 @@ impl Parser {
             TokenKind::CompKeyword | TokenKind::FnKeyword => {
                 self.parse_function_declaration(compiler)
             }
-            _ => todo!("Error handling!"),
+            TokenKind::Error => SyntaxNode::<Parsed>::error(self.current(compiler).location()),
+            err => {
+                let location = self.current(compiler).location();
+                compiler
+                    .diagnostics
+                    .report_invalid_top_level_statement(location, err);
+                SyntaxNode::<Parsed>::error(self.current(compiler).location())
+            }
         }
     }
 
@@ -147,13 +154,18 @@ impl Parser {
     }
 
     fn parse_literal(&mut self, compiler: &mut Compiler) -> SyntaxNode<Parsed> {
+        let location = self.current(compiler).location();
         match self.peek(0, compiler) {
             TokenKind::Integer | TokenKind::TrueKeyword | TokenKind::FalseKeyword => {
                 let literal = self.consume(compiler);
                 SyntaxNode::<Parsed>::literal(literal)
             }
+            TokenKind::Error => SyntaxNode::<Parsed>::error(location),
             unexpected => {
-                todo!("Error handling! {unexpected:#?}")
+                compiler
+                    .diagnostics
+                    .report_cannot_parse_as_expression(location, unexpected);
+                SyntaxNode::<Parsed>::error(location)
             }
         }
     }
@@ -178,12 +190,14 @@ impl Parser {
             let comma = p.maybe_expect(TokenKind::Comma, c);
             SyntaxNode::<Parsed>::commaed_expression(expression, comma)
         });
-        assert!(
-            entries[..entries.len() - 1]
-                .iter()
-                .all(|e| e.kind.ends_with_comma()),
-            "TODO: Error handling"
-        );
+        if let Some(entry_without_comma) = entries[..entries.len() - 1]
+            .iter()
+            .position(|e| !e.kind.ends_with_comma())
+        {
+            compiler
+                .diagnostics
+                .report_missing_comma(entries[entry_without_comma].location);
+        }
         let rbracket = self.expect(TokenKind::RBracket, compiler);
         SyntaxNode::<Parsed>::array_literal(lbracket, entries, rbracket)
     }
@@ -229,13 +243,15 @@ impl Parser {
         let lparen = self.expect(TokenKind::LParen, compiler);
         let parameters = self.parse_until(TokenKind::RParen, compiler, |p, c| p.parse_parameter(c));
         let rparen = self.expect(TokenKind::RParen, compiler);
-        assert!(
-            parameters.is_empty()
-                || parameters[..parameters.len() - 1]
-                    .iter()
-                    .all(|e| e.ends_with_comma()),
-            "TODO: Error handling"
-        );
+        if !parameters.is_empty()
+            && let Some(index) = parameters[..parameters.len() - 1]
+                .iter()
+                .position(|e| e.ends_with_comma())
+        {
+            compiler
+                .diagnostics
+                .report_missing_comma(parameters[index].location);
+        }
         let return_type = if self.peek(0, compiler) == TokenKind::Colon {
             let colon = self.expect(TokenKind::Colon, compiler);
             let type_identifier = self.parse_type_identifier(compiler);
@@ -255,6 +271,7 @@ impl Parser {
     }
 
     fn parse_type_identifier(&mut self, compiler: &mut Compiler) -> TypeIdentifier {
+        let location = self.current(compiler).location();
         match self.peek(0, compiler) {
             TokenKind::Identifier => {
                 let identifier = self.expect(TokenKind::Identifier, compiler);
@@ -274,14 +291,19 @@ impl Parser {
                     rbracket,
                 })
             }
-            unexpected => todo!("Error handling! {unexpected:#?}"),
+            TokenKind::Error => TypeIdentifier::Error(location),
+            unexpected => {
+                compiler
+                    .diagnostics
+                    .report_invalid_type_identifier_format(location, unexpected);
+                TypeIdentifier::Error(location)
+            }
         }
     }
 
     fn parse_block_expression(&mut self, compiler: &mut Compiler) -> SyntaxNode<Parsed> {
         let lbrace = self.expect(TokenKind::LBrace, compiler);
         let body = self.parse_until(TokenKind::RBrace, compiler, |p, c| p.parse_statement(c));
-        // assert!(body[..body.len() - 1].iter().all(|))
         let rbrace = self.expect(TokenKind::RBrace, compiler);
         SyntaxNode::<Parsed>::block_expression(lbrace, body, rbrace)
     }
@@ -318,13 +340,15 @@ impl Parser {
                 let comma = p.maybe_expect(TokenKind::Comma, c);
                 SyntaxNode::<Parsed>::commaed_expression(argument, comma)
             });
-            assert!(
-                arguments.is_empty()
-                    || arguments[..arguments.len() - 1]
-                        .iter()
-                        .all(|e| e.kind.ends_with_comma()),
-                "TODO: Error handling"
-            );
+            if !arguments.is_empty()
+                && let Some(index) = arguments[..arguments.len() - 1]
+                    .iter()
+                    .position(|e| !e.kind.ends_with_comma())
+            {
+                compiler
+                    .diagnostics
+                    .report_missing_comma(arguments[index].location);
+            }
 
             let rparen = self.expect(TokenKind::RParen, compiler);
             base = SyntaxNode::<Parsed>::function_call(base, lparen, arguments, rparen);
@@ -334,17 +358,36 @@ impl Parser {
 
     fn parse_generic_parameter(&mut self, compiler: &mut Compiler) -> GenericParameterNode<Parsed> {
         let out = self.maybe_identifier("out", compiler);
+        if let Some(out) = &out
+            && [
+                TokenKind::Colon,
+                TokenKind::Comma,
+                self.expected.last().copied().unwrap_or(TokenKind::Eof),
+            ]
+            .contains(&self.peek(0, compiler))
+        {
+            compiler
+                .diagnostics
+                .report_cannot_use_reserved_keyword(out.location(), "out");
+        }
         let identifier = self.expect(TokenKind::Identifier, compiler);
         let type_ = if self.peek(0, compiler) == TokenKind::Colon {
             let colon = self.expect(TokenKind::Colon, compiler);
             let type_ = self.parse_type_identifier(compiler);
             Some((colon, type_))
         } else {
-            assert!(out.is_none());
             None
         };
         let comma = self.maybe_expect(TokenKind::Comma, compiler);
-        GenericParameterNode::<Parsed>::new(out, identifier, type_, comma)
+
+        let has_type = type_.is_some();
+        let result = GenericParameterNode::<Parsed>::new(out, identifier, type_, comma);
+        if !has_type && out.is_some() {
+            compiler
+                .diagnostics
+                .report_cannot_declare_type_generics_as_out(result.location);
+        }
+        result
     }
 
     fn maybe_identifier(&mut self, lexeme: &str, compiler: &mut Compiler) -> Option<Token> {
@@ -355,5 +398,10 @@ impl Parser {
         } else {
             None
         }
+    }
+
+    fn current(&mut self, compiler: &mut Compiler) -> &Token {
+        self.peek(0, compiler);
+        &self.buffer[0]
     }
 }
