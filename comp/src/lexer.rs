@@ -62,6 +62,7 @@ impl Token {
             "false" => TokenKind::FalseKeyword,
             "comp" => TokenKind::CompKeyword,
             "fn" => TokenKind::FnKeyword,
+            "struct" => TokenKind::StructKeyword,
             _ => TokenKind::Identifier,
         };
         Self {
@@ -104,6 +105,7 @@ pub enum TokenKind {
     RParen,
     CompKeyword,
     FnKeyword,
+    StructKeyword,
     LBrace,
     RBrace,
     LessThan,
@@ -145,6 +147,7 @@ impl TokenKind {
             TokenKind::RParen => ")",
             TokenKind::CompKeyword => "comp keyword",
             TokenKind::FnKeyword => "fn keyword",
+            TokenKind::StructKeyword => "struct keyword",
             TokenKind::LBrace => "{",
             TokenKind::RBrace => "}",
             TokenKind::LessThan => "<",

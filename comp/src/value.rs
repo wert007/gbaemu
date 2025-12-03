@@ -1,4 +1,4 @@
-use crate::BoundId;
+use crate::{BoundId, typing::TypeId};
 
 #[derive(Debug, Clone)]
 pub enum Value {
@@ -10,6 +10,7 @@ pub enum Value {
     Array(Vec<Value>),
     CompileTimeFunction(BoundId),
     DependentOn(BoundId),
+    Type(TypeId),
 }
 impl Value {
     pub(crate) fn as_u32(&self) -> Option<u32> {

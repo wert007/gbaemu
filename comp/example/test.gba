@@ -1,14 +1,14 @@
-const a = 222222222222222222222222222222222222222222222222222222222222222222222222;
+const a = 2;
 const b = 5;
 const d = true;
-const c = d + d;
+const c = a + b;
 const f = [1, 2, 3, 4];
 
-fn g(): u8 {
+fn g(): u32 {
     12
 }
 
-const h = g() + b;
+const h = g();
 
 comp fn j<out len: u16>(): [u8; len] {
     len = 2;
@@ -16,3 +16,10 @@ comp fn j<out len: u16>(): [u8; len] {
 }
 
 const k = j();
+
+struct Pos {
+    x: u32,
+    y: u32,
+}
+
+const l = Pos { x: 5, y: 3 };

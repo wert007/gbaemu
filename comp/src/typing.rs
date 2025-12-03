@@ -1,6 +1,6 @@
 use std::{collections::HashMap, ops::Index};
 
-use crate::{StringId, StringInterner};
+use crate::{Location, StringId, StringInterner, bind::VariableId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TypeId(usize);
@@ -28,6 +28,14 @@ pub enum Type {
     Bool,
     Array(TypeId, usize),
     FunctionType(Vec<TypeId>, TypeId),
+    Struct(StructType),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructType {
+    pub name: StringId,
+    pub identifier: VariableId,
+    pub fields: Vec<(Location, StringId, TypeId)>,
 }
 
 #[derive(Debug)]
@@ -128,6 +136,9 @@ impl Types {
                 write!(f, "), ")?;
                 self.fmt_type(*return_type, f, strings)?;
                 write!(f, ">")
+            }
+            Type::Struct(struct_) => {
+                write!(f, "{}", &strings[struct_.name])
             }
         }
     }

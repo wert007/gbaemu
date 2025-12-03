@@ -9,7 +9,7 @@ use crate::{
     lexer::{Token, TokenKind},
     parser::Parser,
     syntax_tree::*,
-    typing::{Type, TypeId, Types},
+    typing::{StructType, Type, TypeId, Types},
     value::Value,
 };
 
@@ -192,6 +192,8 @@ impl Binder {
                     compiler,
                     id,
                 ),
+            SyntaxNodeKind::StructDeclaration(struct_declaration_node) => self
+                .bind_struct_declaration(struct_declaration_node, expected, location, compiler, id),
             SyntaxNodeKind::FunctionCall(function_call_node) => {
                 self.bind_function_call(function_call_node, expected, location, compiler, id)
             }
@@ -731,5 +733,37 @@ impl Binder {
             self.register_constant(identifier, Value::DependentOn(body));
         }
         GenericParameterNode::<Bound>::new(is_out, identifier, type_, p.location)
+    }
+
+    fn bind_struct_declaration(
+        &mut self,
+        struct_declaration_node: StructDeclarationNode<Parsed>,
+        expected: TypeId,
+        location: Location,
+        compiler: &mut Compiler,
+        id: BoundId,
+    ) -> SyntaxNode<Bound> {
+        let name = compiler.intern_location(struct_declaration_node.identifier.location());
+        let fields: Vec<(Location, StringId, TypeId)> = struct_declaration_node
+            .fields
+            .into_iter()
+            .map(|f| self.bind_parameter(f, compiler))
+            .collect();
+        let Some(identifier) = self.register_variable(
+            struct_declaration_node.identifier.location(),
+            name,
+            TypeId::TYPE,
+        ) else {
+            todo!("Error handling")
+        };
+
+        let type_ = compiler.types.register(Type::Struct(StructType {
+            name,
+            identifier,
+            fields,
+        }));
+        self.register_constant(identifier, Value::Type(type_));
+
+        unsafe { SyntaxNode::empty(id) }
     }
 }

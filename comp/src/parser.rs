@@ -100,9 +100,13 @@ impl Parser {
     fn parse_top_level_statement(&mut self, compiler: &mut Compiler) -> SyntaxNode<Parsed> {
         match self.peek(0, compiler) {
             TokenKind::ConstKeyword => self.parse_const_declaration(compiler),
-            TokenKind::CompKeyword | TokenKind::FnKeyword => {
-                self.parse_function_declaration(compiler)
-            }
+            TokenKind::CompKeyword => match self.peek(1, compiler) {
+                TokenKind::FnKeyword => self.parse_function_declaration(compiler),
+                TokenKind::StructKeyword => self.parse_struct_declaration(compiler),
+                _ => todo!("Error handling!"),
+            },
+            TokenKind::FnKeyword => self.parse_function_declaration(compiler),
+            TokenKind::StructKeyword => self.parse_struct_declaration(compiler),
             TokenKind::Error => SyntaxNode::<Parsed>::error(self.current(compiler).location()),
             err => {
                 let location = self.current(compiler).location();
@@ -217,6 +221,33 @@ impl Parser {
         )
     }
 
+    fn parse_struct_declaration(&mut self, compiler: &mut Compiler) -> SyntaxNode<Parsed> {
+        let comp_keyword = self.maybe_expect(TokenKind::CompKeyword, compiler);
+        let struct_keyword = self.expect(TokenKind::StructKeyword, compiler);
+        let identifier = self.expect(TokenKind::Identifier, compiler);
+        let lbrace = self.expect(TokenKind::LBrace, compiler);
+        let fields = self.parse_until(TokenKind::RBrace, compiler, |p, c| p.parse_parameter(c));
+        if !fields.is_empty()
+            && let Some(index) = fields[..fields.len() - 1]
+                .iter()
+                .position(|e| !e.ends_with_comma())
+        {
+            compiler
+                .diagnostics
+                .report_missing_comma(fields[index].location);
+        }
+
+        let rbrace = self.expect(TokenKind::RBrace, compiler);
+
+        SyntaxNode::<Parsed>::struct_declaration(
+            comp_keyword,
+            struct_keyword,
+            identifier,
+            lbrace,
+            fields,
+            rbrace,
+        )
+    }
     fn maybe_expect(&mut self, comma: TokenKind, compiler: &mut Compiler) -> Option<Token> {
         if self.peek(0, compiler) == comma {
             Some(self.consume(compiler))

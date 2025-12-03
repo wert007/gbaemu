@@ -356,6 +356,22 @@ impl SyntaxNode<Bound> {
             },
         }
     }
+
+    pub unsafe fn empty(id: BoundId) -> SyntaxNode<Bound> {
+        Self {
+            location: unsafe { Location::zero() },
+            kind: SyntaxNodeKind::BlockExpression(BlockExpressionNode {
+                lbrace: (),
+                body: Vec::new(),
+                rbrace: (),
+            }),
+            stage: Bound {
+                id,
+                type_: TypeId::VOID,
+                constant_value: None,
+            },
+        }
+    }
 }
 
 fn to_option(value: bool) -> Option<()> {
@@ -425,6 +441,32 @@ impl SyntaxNode<Parsed> {
                 identifier,
                 head: function_header,
                 body: Box::new(body),
+            }),
+            stage: Parsed,
+        }
+    }
+
+    pub(crate) fn struct_declaration(
+        comp_keyword: Option<Token>,
+        struct_keyword: Token,
+        identifier: Token,
+        lbrace: Token,
+        fields: Vec<ParameterNode<Parsed>>,
+        rbrace: Token,
+    ) -> SyntaxNode<Parsed> {
+        let location = struct_keyword
+            .location()
+            .combine(comp_keyword.map(|l| l.location()))
+            .combine(rbrace.location());
+        Self {
+            location,
+            kind: SyntaxNodeKind::StructDeclaration(StructDeclarationNode {
+                comp_keyword,
+                struct_keyword,
+                identifier,
+                lbrace,
+                fields,
+                rbrace,
             }),
             stage: Parsed,
         }
@@ -581,6 +623,7 @@ pub enum SyntaxNodeKind<S: Stage> {
     FunctionCall(FunctionCallNode<S>),
     AssignmentStatement(AssignmentStatementNode<S>),
     Conversion(ConversionNode<S>),
+    StructDeclaration(StructDeclarationNode<Parsed>),
 }
 
 #[derive(Debug, Clone)]
@@ -613,6 +656,17 @@ pub struct FunctionDeclarationNode<S: Stage> {
     pub head: FunctionHeaderNode<S>,
     pub body: S::ChildNodeBoxed,
 }
+
+#[derive(Debug, Clone)]
+pub struct StructDeclarationNode<S: Stage> {
+    pub comp_keyword: Option<S::Token>,
+    struct_keyword: S::Token,
+    pub identifier: S::Identifier,
+    lbrace: S::Token,
+    pub fields: Vec<ParameterNode<S>>,
+    rbrace: S::Token,
+}
+
 #[derive(Debug, Clone)]
 pub struct BlockExpressionNode<S: Stage> {
     lbrace: S::Token,
