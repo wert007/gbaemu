@@ -2,14 +2,17 @@ use std::{ops::Index, path::Path};
 
 use crate::{
     bind::Binder,
+    diagnostics::Diagnostics,
     lexer::{Lexer, Token},
     parser::Parser,
     syntax_tree::{Bound, Parsed, SyntaxNode, SyntaxTree},
+    typing::Types,
     value::Value,
 };
 
 mod bind;
 mod const_evaluator;
+mod diagnostics;
 mod lexer;
 mod parser;
 mod syntax_tree;
@@ -21,6 +24,7 @@ pub struct Compiler {
     pub diagnostics: Diagnostics,
     pub strings: StringInterner,
     pub nodes: BoundTree,
+    pub types: Types,
 }
 
 impl Index<SourceTextId> for Compiler {
@@ -41,10 +45,12 @@ impl Index<Location> for Compiler {
 
 impl Compiler {
     pub fn new() -> Self {
+        let mut strings = StringInterner::new();
         Self {
             files: SourceText::empty(),
             diagnostics: Diagnostics::empty(),
-            strings: StringInterner::new(),
+            types: Types::new(&mut strings),
+            strings,
             nodes: BoundTree::new(),
         }
     }
@@ -67,7 +73,7 @@ impl Compiler {
     }
 
     pub fn bind(&mut self, file: SourceTextId) {
-        Binder::new(file, self).bind(self);
+        Binder::new(file).bind(self);
     }
 
     pub fn intern(&mut self, string: impl Into<String>) -> StringId {
@@ -79,7 +85,8 @@ impl Compiler {
     }
 
     pub fn write_diagnostics(&self, out: &mut impl std::io::Write) -> std::io::Result<()> {
-        self.diagnostics.write_to(out, &self.files)
+        self.diagnostics
+            .write_to(out, &self.files, &self.types, &self.strings)
     }
 }
 
@@ -190,293 +197,6 @@ impl Location {
 
 pub trait HasLocation {
     fn location(&self) -> Location;
-}
-
-pub struct DiagnosticMessage(String);
-
-impl From<&str> for DiagnosticMessage {
-    fn from(value: &str) -> Self {
-        Self(value.into())
-    }
-}
-impl From<String> for DiagnosticMessage {
-    fn from(value: String) -> Self {
-        Self(value.into())
-    }
-}
-
-pub struct Diagnostic {
-    location: Location,
-    message: DiagnosticMessage,
-}
-impl Diagnostic {
-    fn invalid_char(location: Location, ch: char) -> Diagnostic {
-        Self {
-            location,
-            message: format!("Unexpected char {ch} in input!").into(),
-        }
-    }
-
-    fn missing_comma(location: Location) -> Diagnostic {
-        Self {
-            location,
-            message: "There is a comma missing here.".into(),
-        }
-    }
-
-    fn cannot_declare_type_generics_as_out(location: Location) -> Diagnostic {
-        Self {
-            location,
-            message: "Generic cannot be marked as out, since it has no type set.".into(),
-        }
-    }
-
-    fn cannot_use_reserved_keyword(location: Location, keyword: &str) -> Diagnostic {
-        Self {
-            location,
-            message: format!("Cannot use keyword `{keyword}` here.").into(),
-        }
-    }
-
-    fn invalid_top_level_statement(location: Location, found: lexer::TokenKind) -> Diagnostic {
-        Self {
-            location,
-            message: format!(
-                "Only const declarations and function definitions are valid here. Found a/an {} instead.",
-                found.diagnostic_name()
-            ).into()
-        }
-    }
-
-    fn cannot_parse_as_expression(location: Location, unexpected: lexer::TokenKind) -> Diagnostic {
-        Self {
-            location,
-            message: format!(
-                "Cannot parse a/an {} as an expression.",
-                unexpected.diagnostic_name()
-            )
-            .into(),
-        }
-    }
-
-    fn invalid_type_identifier_format(
-        location: Location,
-        unexpected: lexer::TokenKind,
-    ) -> Diagnostic {
-        Self {
-            location,
-            message: format!(
-                "Type identifiers must be either written as `typeName` or as `[typeName; NUMBER]`, found a/an {} instead.",
-                unexpected.diagnostic_name()
-            ).into(),
-        }
-    }
-
-    fn cannot_find_type(location: Location) -> Diagnostic {
-        Self {
-            location,
-            message: "No type by this name could be found.".into(),
-        }
-    }
-
-    fn non_const_value_in_type(location: Location) -> Diagnostic {
-        Self {
-            location,
-            message: "Expression did not evaluate at compile time. Is it not const?".into(),
-        }
-    }
-
-    fn cannot_find_variable_by_name(location: Location) -> Diagnostic {
-        Self {
-            location,
-            message: "No variable by this name could be found.".into(),
-        }
-    }
-
-    fn cannot_redeclare_variable(location: Location) -> Diagnostic {
-        Self {
-            location,
-            message:
-                "Variable with this name has been already declared and cannot be declared again."
-                    .into(),
-        }
-    }
-
-    fn previous_declaration_at(location: Location) -> Diagnostic {
-        Self {
-            location,
-            message: "The previous conflicting declaration was here.".into(),
-        }
-    }
-
-    fn non_const_value_in_const_declaration(location: Location) -> Diagnostic {
-        Self {
-            location,
-            message: "The value cannot be computed at compile time and can therefore not be used in a const declaration.".into()
-        }
-    }
-
-    fn cannot_parse_integer_literal_to(
-        location: Location,
-        _expected: typing::TypeId,
-    ) -> Diagnostic {
-        Self {
-            location,
-            message: "Value is not a valid representation for this integer".into(),
-        }
-    }
-
-    fn cannot_convert(location: Location, from: typing::TypeId, to: typing::TypeId) -> Diagnostic {
-        Self {
-            location,
-            message: "Cannot implicitly convert between those types!".into(),
-        }
-    }
-
-    fn invalid_binary_operation(
-        location: Location,
-        lhs_type: typing::TypeId,
-        op: bind::BoundBinaryOperator,
-        rhs_type: typing::TypeId,
-    ) -> Diagnostic {
-        Self {
-            location,
-            message: format!("Cannot {} those types.", op.diagnostic_name()).into(),
-        }
-    }
-}
-
-pub struct Diagnostics {
-    diagnostics: Vec<Diagnostic>,
-}
-impl Diagnostics {
-    fn empty() -> Diagnostics {
-        Diagnostics {
-            diagnostics: Vec::new(),
-        }
-    }
-
-    fn report_invalid_char(&mut self, location: Location, ch: char) {
-        self.diagnostics
-            .push(Diagnostic::invalid_char(location, ch));
-    }
-
-    fn report_missing_comma(&mut self, location: Location) {
-        self.diagnostics.push(Diagnostic::missing_comma(location));
-    }
-
-    fn report_cannot_declare_type_generics_as_out(&mut self, location: Location) {
-        self.diagnostics
-            .push(Diagnostic::cannot_declare_type_generics_as_out(location));
-    }
-
-    fn report_cannot_use_reserved_keyword(&mut self, location: Location, keyword: &str) {
-        self.diagnostics
-            .push(Diagnostic::cannot_use_reserved_keyword(location, keyword));
-    }
-
-    fn report_invalid_top_level_statement(&mut self, location: Location, found: lexer::TokenKind) {
-        self.diagnostics
-            .push(Diagnostic::invalid_top_level_statement(location, found));
-    }
-
-    fn report_cannot_parse_as_expression(
-        &mut self,
-        location: Location,
-        unexpected: lexer::TokenKind,
-    ) {
-        self.diagnostics
-            .push(Diagnostic::cannot_parse_as_expression(location, unexpected));
-    }
-
-    fn report_invalid_type_identifier_format(
-        &mut self,
-        location: Location,
-        unexpected: lexer::TokenKind,
-    ) {
-        self.diagnostics
-            .push(Diagnostic::invalid_type_identifier_format(
-                location, unexpected,
-            ));
-    }
-
-    fn report_cannot_find_type(&mut self, location: Location) {
-        self.diagnostics
-            .push(Diagnostic::cannot_find_type(location))
-    }
-
-    fn report_non_const_value_in_type(&mut self, location: Location) {
-        self.diagnostics
-            .push(Diagnostic::non_const_value_in_type(location));
-    }
-
-    fn report_non_const_value_in_const_declaration(&mut self, location: Location) {
-        self.diagnostics
-            .push(Diagnostic::non_const_value_in_const_declaration(location));
-    }
-
-    fn report_cannot_find_variable_by_name(&mut self, location: Location) {
-        self.diagnostics
-            .push(Diagnostic::cannot_find_variable_by_name(location));
-    }
-
-    fn report_cannot_redeclare_variable(&mut self, location: Location, previous: Location) {
-        self.diagnostics
-            .push(Diagnostic::cannot_redeclare_variable(location));
-        self.diagnostics
-            .push(Diagnostic::previous_declaration_at(previous));
-    }
-
-    fn write_to(
-        &self,
-        out: &mut impl std::io::Write,
-        files: &SourceText,
-    ) -> Result<(), std::io::Error> {
-        for diagnostic in &self.diagnostics {
-            writeln!(
-                out,
-                "[{}:{}:{}] {}",
-                files.file_name(diagnostic.location),
-                files.line_number(diagnostic.location),
-                files.column(diagnostic.location),
-                diagnostic.message.0
-            )?;
-        }
-        Ok(())
-    }
-
-    fn report_cannot_parse_integer_literal_to(
-        &mut self,
-        location: Location,
-        expected: typing::TypeId,
-    ) {
-        self.diagnostics
-            .push(Diagnostic::cannot_parse_integer_literal_to(
-                location, expected,
-            ));
-    }
-
-    fn report_cannot_convert(
-        &mut self,
-        location: Location,
-        from: typing::TypeId,
-        to: typing::TypeId,
-    ) {
-        self.diagnostics
-            .push(Diagnostic::cannot_convert(location, from, to));
-    }
-
-    fn report_invalid_binary_operation(
-        &mut self,
-        location: Location,
-        lhs_type: typing::TypeId,
-        op: bind::BoundBinaryOperator,
-        rhs_type: typing::TypeId,
-    ) {
-        self.diagnostics.push(Diagnostic::invalid_binary_operation(
-            location, lhs_type, op, rhs_type,
-        ));
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

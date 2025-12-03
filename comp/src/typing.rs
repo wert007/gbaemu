@@ -1,6 +1,6 @@
 use std::{collections::HashMap, ops::Index};
 
-use crate::{Compiler, StringId, StringInterner};
+use crate::{StringId, StringInterner};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TypeId(usize);
@@ -43,7 +43,7 @@ macro_rules! type_names {
 }
 
 impl Types {
-    pub fn new(compiler: &mut Compiler) -> Self {
+    pub fn new(compiler: &mut StringInterner) -> Self {
         let names = type_names!(compiler =>
             VOID, "void",
             UNSIGNED_INTEGER_8, "u8",
@@ -97,29 +97,37 @@ impl Types {
         }
     }
 
-    pub fn display(&self, type_: TypeId) -> String {
+    pub(crate) fn fmt_type(
+        &self,
+        type_: TypeId,
+        f: &mut std::fmt::Formatter<'_>,
+        strings: &StringInterner,
+    ) -> Result<(), std::fmt::Error> {
         match &self[type_] {
-            Type::Error => "#error".into(),
-            Type::Unknown => "?unknown".into(),
-            Type::Void => "void".into(),
-            Type::Type => "type".into(),
-            Type::UnsignedInteger8 => "u8".into(),
-            Type::UnsignedInteger16 => "u16".into(),
-            Type::UnsignedInteger32 => "u32".into(),
-            Type::Bool => "bool".into(),
-            Type::Array(type_, len) => format!("[{}; {len}]", self.display(*type_)),
+            Type::Error => write!(f, "#error"),
+            Type::Unknown => write!(f, "?unknown"),
+            Type::Void => write!(f, "void"),
+            Type::Type => write!(f, "type"),
+            Type::UnsignedInteger8 => write!(f, "u8"),
+            Type::UnsignedInteger16 => write!(f, "u16"),
+            Type::UnsignedInteger32 => write!(f, "u32"),
+            Type::Bool => write!(f, "bool"),
+            Type::Array(type_, len) => {
+                write!(f, "[")?;
+                self.fmt_type(*type_, f, strings)?;
+                write!(f, "; {len}]")
+            }
             Type::FunctionType(parameter, return_type) => {
-                let parameter = parameter.iter().copied().map(|p| self.display(p)).fold(
-                    String::new(),
-                    |acc, cur| {
-                        if acc.is_empty() {
-                            cur
-                        } else {
-                            format!("{acc}, {cur}")
-                        }
-                    },
-                );
-                format!("Fn<({parameter}), {}>", self.display(*return_type))
+                write!(f, "Fn<(")?;
+                for (i, parameter) in parameter.iter().enumerate() {
+                    if i != 0 {
+                        write!(f, ", ")?;
+                    }
+                    self.fmt_type(*parameter, f, strings)?;
+                }
+                write!(f, "), ")?;
+                self.fmt_type(*return_type, f, strings)?;
+                write!(f, ">")
             }
         }
     }

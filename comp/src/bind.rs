@@ -123,16 +123,14 @@ pub struct VariableId(usize);
 #[derive(Debug)]
 pub struct Binder {
     file: SourceTextId,
-    types: Types,
     variables: Variables,
     constants: HashMap<VariableId, Value>,
 }
 
 impl Binder {
-    pub fn new(file: SourceTextId, compiler: &mut Compiler) -> Binder {
+    pub fn new(file: SourceTextId) -> Binder {
         Self {
             file,
-            types: Types::new(compiler),
             variables: Variables::new(),
             constants: HashMap::new(),
         }
@@ -309,7 +307,7 @@ impl Binder {
             return base_id;
         }
         let id = unsafe { compiler.nodes.prepare_id() };
-        let node = if conversion_kind.convert(base_type, expected, &mut self.types) {
+        let node = if conversion_kind.convert(base_type, expected, &mut compiler.types) {
             SyntaxNode::<Bound>::conversion(location, base_id, expected, conversion_kind, id)
         } else {
             compiler
@@ -330,12 +328,6 @@ impl Binder {
     ) -> SyntaxNode<Bound> {
         let name = compiler.intern_location(token.location());
         if let Some(variable) = self.look_up_variable_by_name(name) {
-            assert!(
-                expected == variable.type_ || expected == TypeId::UNKNOWN,
-                "{} vs {}",
-                self.types.display(expected),
-                self.types.display(variable.type_)
-            );
             SyntaxNode::<Bound>::variable(
                 token.location(),
                 variable,
@@ -439,7 +431,7 @@ impl Binder {
         let (lhs_type, rhs_type, return_type) = op.resolve_types(
             compiler.nodes.type_of(lhs),
             compiler.nodes.type_of(rhs),
-            &mut self.types,
+            &mut compiler.types,
         );
         let lhs = self.bind_conversion(lhs, lhs_type, compiler, ConversionKind::Implicit);
         let rhs = self.bind_conversion(rhs, rhs_type, compiler, ConversionKind::Implicit);
@@ -479,13 +471,9 @@ impl Binder {
             .map(|e| compiler.nodes.type_of(*e))
             .fold(TypeId::UNKNOWN, |acc, cur| acc);
         let length = entries.len();
-        let type_ = self.register_type(Type::Array(inner_type, length));
+        let type_ = compiler.types.register(Type::Array(inner_type, length));
         assert!(type_ == expected || expected == TypeId::UNKNOWN);
         SyntaxNode::<Bound>::array_literal(entries, type_, location, id)
-    }
-
-    fn register_type(&mut self, type_: Type) -> TypeId {
-        self.types.register(type_)
     }
 
     fn bind_expression_statement(
@@ -614,7 +602,7 @@ impl Binder {
             parameters_bound.iter().map(|(.., t)| *t).collect(),
             return_type,
         );
-        let type_ = self.register_type(type_);
+        let type_ = compiler.types.register(type_);
         let identifier = self
             .register_variable(identifier_location, identifier, type_)
             .expect("no duplicate!");
@@ -638,7 +626,7 @@ impl Binder {
             TypeIdentifier::Error(_) => TypeId::ERROR,
             TypeIdentifier::Named(name) => {
                 let name = compiler.intern_location(name.location());
-                match self.types.find_by_name(name) {
+                match compiler.types.find_by_name(name) {
                     Some(it) => it,
                     None => {
                         compiler.diagnostics.report_cannot_find_type(t.location());
@@ -663,7 +651,7 @@ impl Binder {
                 let Some(length) = length.as_usize() else {
                     return TypeId::ERROR;
                 };
-                self.types.register(Type::Array(inner, length as _))
+                compiler.types.register(Type::Array(inner, length as _))
             }
         }
     }
@@ -705,7 +693,7 @@ impl Binder {
             .map(|a| self.bind_node(a, TypeId::UNKNOWN, compiler))
             .collect();
         let type_ = compiler.nodes.type_of(base);
-        let type_ = self
+        let type_ = compiler
             .types
             .return_type_of(type_)
             .expect("Function have return types!");

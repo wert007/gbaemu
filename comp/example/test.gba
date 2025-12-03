@@ -1,16 +1,18 @@
-const a = 2;
-// const a = 5;
+const a = 222222222222222222222222222222222222222222222222222222222222222222222222;
+const b = 5;
 const d = true;
-const c = a + d;
+const c = d + d;
 const f = [1, 2, 3, 4];
 
-fn g(): u32 {
+fn g(): u8 {
     12
 }
 
-const h = g();
+const h = g() + b;
 
 comp fn j<out len: u16>(): [u8; len] {
     len = 2;
     [0, 1]
 }
+
+const k = j();
