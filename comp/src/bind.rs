@@ -696,6 +696,7 @@ impl Binder {
         compiler: &mut Compiler,
         id: BoundId,
     ) -> SyntaxNode<Bound> {
+        let base_location = function_call_node.base.location();
         let base = self.bind_node(*function_call_node.base, TypeId::UNKNOWN, compiler);
         let arguments = function_call_node
             .arguments
@@ -703,10 +704,15 @@ impl Binder {
             .map(|a| self.bind_node(a, TypeId::UNKNOWN, compiler))
             .collect();
         let type_ = compiler.nodes.type_of(base);
-        let type_ = compiler
-            .types
-            .return_type_of(type_)
-            .expect("Function have return types!");
+        if type_ == TypeId::ERROR {
+            return SyntaxNode::<Bound>::error(location, id);
+        }
+        let Some(type_) = compiler.types.return_type_of(type_) else {
+            compiler
+                .diagnostics
+                .report_invalid_function_type(base_location, type_);
+            return SyntaxNode::<Bound>::error(location, id);
+        };
         SyntaxNode::<Bound>::function_call(location, base, arguments, type_, id)
     }
 
@@ -845,7 +851,16 @@ impl Binder {
                 SyntaxNode::<Bound>::field_access(location, base, field_identifier, type_, id)
             }
             None => {
-                todo!("Error reporting! No field by this name could be found!")
+                if base_type != TypeId::ERROR {
+                    compiler
+                        .diagnostics
+                        .report_cannot_find_field_with_this_name(
+                            location,
+                            base_type,
+                            field_identifier,
+                        );
+                }
+                SyntaxNode::<Bound>::error(location, id)
             }
         }
     }

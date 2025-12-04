@@ -255,6 +255,24 @@ impl Diagnostic {
             ),
         }
     }
+
+    fn cannot_find_field_with_this_name(
+        location: Location,
+        base: TypeId,
+        field: StringId,
+    ) -> Diagnostic {
+        Self {
+            location,
+            message: dgnst!("No field named ", field, " found on ", base, "."),
+        }
+    }
+
+    fn invalid_function_type(location: Location, type_: TypeId) -> Diagnostic {
+        Self {
+            location,
+            message: dgnst!("Cannot call ", type_, " since it is not a function."),
+        }
+    }
 }
 
 pub struct Diagnostics {
@@ -376,5 +394,22 @@ impl Diagnostics {
         self.diagnostics.push(Diagnostic::invalid_binary_operation(
             location, lhs_type, op, rhs_type,
         ));
+    }
+
+    pub(crate) fn report_cannot_find_field_with_this_name(
+        &mut self,
+        location: Location,
+        base: TypeId,
+        field: StringId,
+    ) {
+        self.diagnostics
+            .push(Diagnostic::cannot_find_field_with_this_name(
+                location, base, field,
+            ));
+    }
+
+    pub(crate) fn report_invalid_function_type(&mut self, location: Location, type_: TypeId) {
+        self.diagnostics
+            .push(Diagnostic::invalid_function_type(location, type_))
     }
 }
