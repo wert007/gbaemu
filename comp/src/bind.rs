@@ -9,7 +9,7 @@ use crate::{
     lexer::{Token, TokenKind},
     parser::Parser,
     syntax_tree::*,
-    typing::{StructType, Type, TypeId, Types},
+    typing::{StructLayout, StructType, Type, TypeId, Types},
     value::Value,
 };
 
@@ -208,6 +208,9 @@ impl Binder {
             SyntaxNodeKind::Conversion(_conversion_node) => {
                 todo!("These are not created yet during parsing")
             }
+            SyntaxNodeKind::StructLiteral(struct_literal_node) => {
+                self.bind_struct_literal(struct_literal_node, expected, location, compiler, id)
+            }
         };
         unsafe {
             compiler.nodes.set(id, node);
@@ -235,7 +238,6 @@ impl Binder {
         match token.kind {
             TokenKind::Error => SyntaxNode::<Bound>::error(token.location(), id),
             TokenKind::Integer => {
-                assert!(expected == TypeId::UNKNOWN || expected == TypeId::UNSIGNED_INTEGER_32);
                 let lexeme = &compiler[token.location()];
                 let (value, type_) = match expected {
                     TypeId::UNSIGNED_INTEGER_8 => {
@@ -759,13 +761,67 @@ impl Binder {
             todo!("Error handling")
         };
 
+        // let fields_bound = fields
+        //     .iter()
+        //     .map(|f| ParameterNode::<Bound>::new(f.0, f.1, f.2))
+        //     .collect();
+        let layout = StructLayout::from_fields(&fields, &compiler.types);
         let type_ = compiler.types.register(Type::Struct(StructType {
             name,
             identifier,
             fields,
+            layout,
         }));
         self.register_constant(identifier, Value::Type(type_));
 
+        // TODO: Keep struct declaration similarly to const or function declaration!
         unsafe { SyntaxNode::empty(id) }
+        // SyntaxNode::<Bound>::struct_declaration(location, identifier, fields_bound, type_, id)
+    }
+
+    fn bind_struct_literal(
+        &mut self,
+        struct_literal_node: StructLiteralNode<Parsed>,
+        expected: TypeId,
+        location: Location,
+        compiler: &mut Compiler,
+        id: BoundId,
+    ) -> SyntaxNode<Bound> {
+        let identifier = compiler.intern_location(struct_literal_node.identifier.location());
+        let identifier = self
+            .look_up_variable_by_name(identifier)
+            .expect("error handling")
+            .id;
+        let type_ = self
+            .look_up_constant(identifier)
+            .expect("should be constant")
+            .as_type()
+            .expect("should be type id");
+        let struct_type = compiler
+            .types
+            .as_struct_type(type_)
+            .expect("should be struct")
+            .clone();
+        let fields: Vec<_> = struct_literal_node
+            .fields
+            .into_iter()
+            .map(|f| self.bind_field_initializer(f, &struct_type, compiler))
+            .collect();
+        // TODO: Ensure all fields are initialized!
+        SyntaxNode::<Bound>::struct_literal(location, identifier, fields, type_, id)
+    }
+
+    fn bind_field_initializer(
+        &mut self,
+        f: FieldInitilizationNode<Parsed>,
+        struct_type: &StructType,
+        compiler: &mut Compiler,
+    ) -> FieldInitilizationNode<Bound> {
+        let identifier = compiler.intern_location(f.identifier.location());
+        let expected = struct_type
+            .get_field_type_by_name(identifier)
+            .unwrap_or(TypeId::ERROR);
+        let expression = self.bind_node(*f.expression, expected, compiler);
+        FieldInitilizationNode::<Bound>::new(f.location, identifier, expression)
     }
 }

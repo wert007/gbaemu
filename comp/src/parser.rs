@@ -4,8 +4,9 @@ use crate::{
     Compiler, HasLocation, SourceTextId,
     lexer::{Lexer, Token, TokenKind},
     syntax_tree::{
-        ArrayTypeIdentifier, FunctionHeaderNode, GenericParameterHeaderNode, GenericParameterNode,
-        ParameterNode, Parsed, SyntaxNode, SyntaxTree, TypeIdentifier,
+        ArrayTypeIdentifier, FieldInitilizationNode, FunctionHeaderNode,
+        GenericParameterHeaderNode, GenericParameterNode, ParameterNode, Parsed, SyntaxNode,
+        SyntaxTree, TypeIdentifier,
     },
 };
 
@@ -174,14 +175,24 @@ impl Parser {
         }
     }
 
-    fn parse_variable(&mut self, compiler: &mut Compiler) -> SyntaxNode<Parsed> {
+    fn parse_variable_or_struct_literal(&mut self, compiler: &mut Compiler) -> SyntaxNode<Parsed> {
         let variable = self.expect(TokenKind::Identifier, compiler);
-        SyntaxNode::<Parsed>::variable(variable)
+        if self.peek(0, compiler) == TokenKind::LBrace {
+            let identifier = variable;
+            let lbrace = self.expect(TokenKind::LBrace, compiler);
+            let fields = self.parse_until(TokenKind::RBrace, compiler, |p, c| {
+                p.parse_field_initialization(c)
+            });
+            let rbrace = self.expect(TokenKind::RBrace, compiler);
+            SyntaxNode::<Parsed>::struct_literal(identifier, lbrace, fields, rbrace)
+        } else {
+            SyntaxNode::<Parsed>::variable(variable)
+        }
     }
 
     fn parse_expression_atom(&mut self, compiler: &mut Compiler) -> SyntaxNode<Parsed> {
         match self.peek(0, compiler) {
-            TokenKind::Identifier => self.parse_variable(compiler),
+            TokenKind::Identifier => self.parse_variable_or_struct_literal(compiler),
             TokenKind::LBracket => self.parse_array_literal(compiler),
             _ => self.parse_literal(compiler),
         }
@@ -434,5 +445,16 @@ impl Parser {
     fn current(&mut self, compiler: &mut Compiler) -> &Token {
         self.peek(0, compiler);
         &self.buffer[0]
+    }
+
+    fn parse_field_initialization(
+        &mut self,
+        compiler: &mut Compiler,
+    ) -> FieldInitilizationNode<Parsed> {
+        let identifier = self.expect(TokenKind::Identifier, compiler);
+        let colon = self.expect(TokenKind::Colon, compiler);
+        let expression = self.parse_expression(compiler);
+        let comma = self.maybe_expect(TokenKind::Comma, compiler);
+        FieldInitilizationNode::<Parsed>::new(identifier, colon, expression, comma)
     }
 }

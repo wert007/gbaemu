@@ -18,12 +18,13 @@ comp fn j<out len: u16>(): [u8; len] {
 const k = j();
 
 struct Pos {
-    x: u32,
-    y: u32,
+    x: u8,
+    y: u8,
 }
 
 struct A {
     foo: ptr,
 }
 
-// const l = Pos { x: 5, y: 3 };
+const l = Pos { x: 255, y: 127 };
+const m = l.x;

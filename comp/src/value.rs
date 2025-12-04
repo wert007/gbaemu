@@ -7,7 +7,7 @@ pub enum Value {
     UnsignedInteger16(u16),
     UnsignedInteger32(u32),
     Bool(bool),
-    Array(Vec<Value>),
+    Pointer(usize),
     CompileTimeFunction(BoundId),
     DependentOn(BoundId),
     Type(TypeId),
@@ -38,5 +38,26 @@ impl Value {
 
     pub(crate) fn is_error(&self) -> bool {
         matches!(self, Value::Error)
+    }
+
+    pub(crate) fn size(&self) -> usize {
+        match self {
+            Value::Error => 0,
+            Value::UnsignedInteger8(_) => 1,
+            Value::UnsignedInteger16(_) => 2,
+            Value::UnsignedInteger32(_) => 4,
+            Value::Bool(_) => 1,
+            Value::Pointer(_) => 4,
+            Value::CompileTimeFunction(_) => 0,
+            Value::DependentOn(_) => 0,
+            Value::Type(_) => 0,
+        }
+    }
+
+    pub(crate) fn as_type(&self) -> Option<TypeId> {
+        match self {
+            Value::Type(it) => Some(*it),
+            _ => None,
+        }
     }
 }

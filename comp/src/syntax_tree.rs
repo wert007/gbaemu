@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+use crate::StringId;
 use crate::bind::conversion::ConversionKind;
 use crate::bind::{BoundBinaryOperator, VariableId};
 use crate::{BoundId, HasLocation, Location, lexer::Token, typing::TypeId, value::Value};
@@ -20,6 +21,7 @@ pub struct Bound {
 }
 
 pub trait Stage: Debug + Clone {
+    type IdentifierUnscoped: Debug + Clone;
     type Identifier: Debug + Clone;
     type Token: Debug + Clone;
     type Value: Debug + Clone;
@@ -30,6 +32,7 @@ pub trait Stage: Debug + Clone {
 }
 
 impl Stage for Parsed {
+    type IdentifierUnscoped = Token;
     type Identifier = Token;
     type Token = Token;
     type Value = Box<SyntaxNode<Parsed>>;
@@ -40,6 +43,7 @@ impl Stage for Parsed {
 }
 
 impl Stage for Bound {
+    type IdentifierUnscoped = StringId;
     type Identifier = VariableId;
     type Token = ();
     type Value = Value;
@@ -372,6 +376,29 @@ impl SyntaxNode<Bound> {
             },
         }
     }
+
+    pub(crate) fn struct_literal(
+        location: Location,
+        identifier: VariableId,
+        fields: Vec<FieldInitilizationNode<Bound>>,
+        type_: TypeId,
+        id: BoundId,
+    ) -> SyntaxNode<Bound> {
+        Self {
+            location,
+            kind: SyntaxNodeKind::StructLiteral(StructLiteralNode {
+                identifier,
+                lbrace: (),
+                fields,
+                rbrace: (),
+            }),
+            stage: Bound {
+                id,
+                type_,
+                constant_value: None,
+            },
+        }
+    }
 }
 
 fn to_option(value: bool) -> Option<()> {
@@ -510,6 +537,25 @@ impl SyntaxNode<Parsed> {
         }
     }
 
+    pub(crate) fn struct_literal(
+        identifier: Token,
+        lbrace: Token,
+        fields: Vec<FieldInitilizationNode<Parsed>>,
+        rbrace: Token,
+    ) -> SyntaxNode<Parsed> {
+        let location = identifier.location().combine(rbrace.location());
+        Self {
+            location,
+            kind: SyntaxNodeKind::StructLiteral(StructLiteralNode {
+                identifier,
+                lbrace,
+                fields,
+                rbrace,
+            }),
+            stage: Parsed,
+        }
+    }
+
     pub(crate) fn literal(literal: Token) -> SyntaxNode<Parsed> {
         Self {
             location: literal.location(),
@@ -623,7 +669,8 @@ pub enum SyntaxNodeKind<S: Stage> {
     FunctionCall(FunctionCallNode<S>),
     AssignmentStatement(AssignmentStatementNode<S>),
     Conversion(ConversionNode<S>),
-    StructDeclaration(StructDeclarationNode<Parsed>),
+    StructDeclaration(StructDeclarationNode<S>),
+    StructLiteral(StructLiteralNode<S>),
 }
 
 #[derive(Debug, Clone)]
@@ -640,6 +687,13 @@ pub struct FunctionCallNode<S: Stage> {
     rparen: S::Token,
 }
 
+#[derive(Debug, Clone)]
+pub struct StructLiteralNode<S: Stage> {
+    pub identifier: S::Identifier,
+    lbrace: S::Token,
+    pub fields: Vec<FieldInitilizationNode<S>>,
+    rbrace: S::Token,
+}
 #[derive(Debug, Clone)]
 pub struct AssignmentStatementNode<S: Stage> {
     pub lhs: S::ChildNodeBoxed,
@@ -803,6 +857,62 @@ impl GenericParameterNode<Parsed> {
         }
     }
 }
+
+#[derive(Debug, Clone)]
+pub struct FieldInitilizationNode<S: Stage> {
+    pub location: Location,
+    pub identifier: S::IdentifierUnscoped,
+    colon: S::Token,
+    pub expression: S::ChildNodeBoxed,
+    comma: Option<S::Token>,
+    _marker: PhantomData<S>,
+}
+
+impl FieldInitilizationNode<Bound> {
+    pub(crate) fn new(
+        location: Location,
+        identifier: crate::StringId,
+        expression: BoundId,
+    ) -> Self {
+        Self {
+            location,
+            identifier,
+            colon: (),
+            expression,
+            comma: None,
+            _marker: Default::default(),
+        }
+    }
+}
+
+impl FieldInitilizationNode<Parsed> {
+    pub(crate) fn new(
+        identifier: Token,
+        colon: Token,
+        expression: SyntaxNode<Parsed>,
+        comma: Option<Token>,
+    ) -> Self {
+        let location = identifier
+            .location()
+            .combine(comma.map(|c| c.location()))
+            .combine(expression.location());
+        Self {
+            location,
+            identifier,
+            colon,
+            expression: Box::new(expression),
+            comma,
+            _marker: Default::default(),
+        }
+    }
+}
+
+impl<S: Stage> HasLocation for FieldInitilizationNode<S> {
+    fn location(&self) -> Location {
+        self.location
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ParameterNode<S: Stage> {
     pub location: Location,

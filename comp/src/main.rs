@@ -10,6 +10,7 @@ fn main() {
     // }
     compiler.bind(file);
     compiler.write_diagnostics(&mut stdout()).unwrap();
+    dbg!(compiler.const_memory);
     // compiler.compile(file);
     println!("Hello, world!");
 }

@@ -4,6 +4,7 @@ use crate::{
     bind::Binder,
     diagnostics::Diagnostics,
     lexer::{Lexer, Token},
+    memory::Memoryblock,
     parser::Parser,
     syntax_tree::{Bound, Parsed, SyntaxNode, SyntaxTree},
     typing::Types,
@@ -14,6 +15,7 @@ mod bind;
 mod const_evaluator;
 mod diagnostics;
 mod lexer;
+mod memory;
 mod parser;
 mod syntax_tree;
 mod typing;
@@ -25,6 +27,7 @@ pub struct Compiler {
     pub strings: StringInterner,
     pub nodes: BoundTree,
     pub types: Types,
+    pub const_memory: Memoryblock<memory::Bound>,
 }
 
 impl Index<SourceTextId> for Compiler {
@@ -52,6 +55,7 @@ impl Compiler {
             types: Types::new(&mut strings),
             strings,
             nodes: BoundTree::new(),
+            const_memory: Memoryblock::new(),
         }
     }
 
@@ -90,7 +94,7 @@ impl Compiler {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StringId(usize);
 
 pub struct StringInterner {

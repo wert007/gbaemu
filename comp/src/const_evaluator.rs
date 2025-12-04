@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use crate::{BoundId, Compiler, bind::VariableId, syntax_tree::*, value::Value};
+use crate::{
+    BoundId, Compiler, StringId, bind::VariableId, syntax_tree::*, typing::TypeId, value::Value,
+};
 
 #[derive(Debug)]
 pub struct ConstEvaluator {
@@ -63,8 +65,47 @@ fn evaluate_expression(
         SyntaxNodeKind::Identifier(identifier) => {
             evaluate_identifier(identifier, compiler, evaluator)
         }
-        _ => None,
+        SyntaxNodeKind::Error => Some(Value::Error),
+        SyntaxNodeKind::Program(_) => None,
+        SyntaxNodeKind::ConstDeclaration(_) => None,
+        SyntaxNodeKind::Literal(_) => unreachable!(),
+        SyntaxNodeKind::CommaedExpression((expression, _)) => {
+            evaluate_expression(expression, compiler, evaluator)
+        }
+        SyntaxNodeKind::FunctionDeclaration(_) => None,
+        SyntaxNodeKind::Conversion(conversion_node) => todo!(),
+        SyntaxNodeKind::StructDeclaration(_) => None,
+        SyntaxNodeKind::StructLiteral(struct_literal_node) => evaluate_struct_literal(
+            &struct_literal_node,
+            compiler.nodes.type_of(expression),
+            compiler,
+            evaluator,
+        ),
     }
+}
+
+fn evaluate_struct_literal(
+    struct_literal_node: &StructLiteralNode<Bound>,
+    type_: TypeId,
+    compiler: &mut Compiler,
+    evaluator: &mut ConstEvaluator,
+) -> Option<Value> {
+    let fields: Option<Vec<(StringId, Value)>> = struct_literal_node
+        .fields
+        .iter()
+        .map(|f| {
+            let value = evaluate_expression(f.expression, compiler, evaluator)?;
+            Some((f.identifier, value))
+        })
+        .collect();
+    let type_ = compiler.types.as_struct_type(type_).unwrap();
+    let fields = fields?;
+    let base = compiler.const_memory.allocate(type_.layout.size());
+    for (field, value) in fields {
+        let offset = type_.layout.offset_of(field).unwrap();
+        compiler.const_memory.write_value(base + offset, value);
+    }
+    Some(Value::Pointer(base))
 }
 
 fn evaluate_identifier(
@@ -160,7 +201,15 @@ fn evaluate_array_literal(
     if entries.iter().any(|v| v.is_error()) {
         Some(Value::Error)
     } else {
-        Some(Value::Array(entries))
+        let size = entries.iter().map(|v| v.size()).sum();
+        let ptr = compiler.const_memory.allocate(size);
+        let mut writing_ptr = ptr;
+        for entry in entries {
+            let size = entry.size();
+            compiler.const_memory.write_value(writing_ptr, entry);
+            writing_ptr += size;
+        }
+        Some(Value::Pointer(ptr))
     }
 }
 
