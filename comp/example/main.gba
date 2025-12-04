@@ -267,11 +267,12 @@ impl<T, len: u16> Index<u16>, IndexMut<u16>, Drop, IntoIterator for Array<T, len
     }
 }
 
-#[linear_type]
 enum BinaryResult {
     Success,
     Error,
 }
+
+impl !Drop for BinaryResult;
 
 impl BinaryResult {
     #[panics]

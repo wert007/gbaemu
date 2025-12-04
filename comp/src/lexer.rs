@@ -18,6 +18,7 @@ impl Token {
         let kind = match ch {
             '\0' => TokenKind::Eof,
             '=' => TokenKind::Equals,
+            '.' => TokenKind::Period,
             ':' => TokenKind::Colon,
             ';' => TokenKind::Semicolon,
             '+' => TokenKind::Plus,
@@ -110,6 +111,7 @@ pub enum TokenKind {
     RBrace,
     LessThan,
     GreaterThan,
+    Period,
 }
 impl TokenKind {
     pub(crate) fn binary_precedence(&self) -> Option<(usize, usize)> {
@@ -143,6 +145,7 @@ impl TokenKind {
             TokenKind::RBracket => "]",
             TokenKind::Comma => ",",
             TokenKind::Colon => ":",
+            TokenKind::Period => ".",
             TokenKind::LParen => "(",
             TokenKind::RParen => ")",
             TokenKind::CompKeyword => "comp keyword",

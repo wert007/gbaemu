@@ -145,7 +145,7 @@ impl Parser {
         compiler: &mut Compiler,
     ) -> SyntaxNode<Parsed> {
         let expression = self.parse_expression_atom(compiler);
-        let mut expression = self.parse_function_call(expression, compiler);
+        let mut expression = self.parse_function_call_or_field_access(expression, compiler);
         while let Some((lhs, rhs)) = self.peek(0, compiler).binary_precedence() {
             if lhs < minimal_precedence {
                 break;
@@ -369,31 +369,41 @@ impl Parser {
         }
     }
 
-    fn parse_function_call(
+    fn parse_function_call_or_field_access(
         &mut self,
         expression: SyntaxNode<Parsed>,
         compiler: &mut Compiler,
     ) -> SyntaxNode<Parsed> {
         let mut base = expression;
-        while self.peek(0, compiler) == TokenKind::LParen {
-            let lparen = self.expect(TokenKind::LParen, compiler);
-            let arguments = self.parse_until(TokenKind::RParen, compiler, |p, c| {
-                let argument = p.parse_expression(c);
-                let comma = p.maybe_expect(TokenKind::Comma, c);
-                SyntaxNode::<Parsed>::commaed_expression(argument, comma)
-            });
-            if !arguments.is_empty()
-                && let Some(index) = arguments[..arguments.len() - 1]
-                    .iter()
-                    .position(|e| !e.kind.ends_with_comma())
-            {
-                compiler
-                    .diagnostics
-                    .report_missing_comma(arguments[index].location);
-            }
+        while [TokenKind::LParen, TokenKind::Period].contains(&self.peek(0, compiler)) {
+            match self.peek(0, compiler) {
+                TokenKind::LParen => {
+                    let lparen = self.expect(TokenKind::LParen, compiler);
+                    let arguments = self.parse_until(TokenKind::RParen, compiler, |p, c| {
+                        let argument = p.parse_expression(c);
+                        let comma = p.maybe_expect(TokenKind::Comma, c);
+                        SyntaxNode::<Parsed>::commaed_expression(argument, comma)
+                    });
+                    if !arguments.is_empty()
+                        && let Some(index) = arguments[..arguments.len() - 1]
+                            .iter()
+                            .position(|e| !e.kind.ends_with_comma())
+                    {
+                        compiler
+                            .diagnostics
+                            .report_missing_comma(arguments[index].location);
+                    }
 
-            let rparen = self.expect(TokenKind::RParen, compiler);
-            base = SyntaxNode::<Parsed>::function_call(base, lparen, arguments, rparen);
+                    let rparen = self.expect(TokenKind::RParen, compiler);
+                    base = SyntaxNode::<Parsed>::function_call(base, lparen, arguments, rparen);
+                }
+                TokenKind::Period => {
+                    let period = self.expect(TokenKind::Period, compiler);
+                    let field = self.expect(TokenKind::Identifier, compiler);
+                    base = SyntaxNode::<Parsed>::field_access(base, period, field);
+                }
+                _ => unreachable!(),
+            }
         }
         base
     }

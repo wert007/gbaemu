@@ -139,6 +139,7 @@ impl Binder {
     pub fn bind(mut self, compiler: &mut Compiler) -> BoundId {
         let tree = Parser::new(self.file).parse(compiler);
         let node = self.bind_node(tree.node, TypeId::VOID, compiler);
+        dbg!(self.constants);
         node
     }
 
@@ -196,6 +197,9 @@ impl Binder {
                 .bind_struct_declaration(struct_declaration_node, expected, location, compiler, id),
             SyntaxNodeKind::FunctionCall(function_call_node) => {
                 self.bind_function_call(function_call_node, expected, location, compiler, id)
+            }
+            SyntaxNodeKind::FieldAccess(field_access_node) => {
+                self.bind_field_access(field_access_node, expected, location, compiler, id)
             }
             SyntaxNodeKind::AssignmentStatement(assignment_statement_node) => self
                 .bind_assignment_statement(
@@ -823,5 +827,26 @@ impl Binder {
             .unwrap_or(TypeId::ERROR);
         let expression = self.bind_node(*f.expression, expected, compiler);
         FieldInitilizationNode::<Bound>::new(f.location, identifier, expression)
+    }
+
+    fn bind_field_access(
+        &mut self,
+        field_access_node: FieldAccessNode<Parsed>,
+        expected: TypeId,
+        location: Location,
+        compiler: &mut Compiler,
+        id: BoundId,
+    ) -> SyntaxNode<Bound> {
+        let base = self.bind_node(*field_access_node.base, TypeId::UNKNOWN, compiler);
+        let field_identifier = compiler.intern_location(field_access_node.field.location());
+        let base_type = compiler.nodes.type_of(base);
+        match compiler.types.field_type(base_type, field_identifier) {
+            Some(type_) => {
+                SyntaxNode::<Bound>::field_access(location, base, field_identifier, type_, id)
+            }
+            None => {
+                todo!("Error reporting! No field by this name could be found!")
+            }
+        }
     }
 }

@@ -1,7 +1,11 @@
 use std::collections::HashMap;
 
 use crate::{
-    BoundId, Compiler, StringId, bind::VariableId, syntax_tree::*, typing::TypeId, value::Value,
+    BoundId, Compiler, StringId,
+    bind::VariableId,
+    syntax_tree::*,
+    typing::{Type, TypeId},
+    value::Value,
 };
 
 #[derive(Debug)]
@@ -81,7 +85,52 @@ fn evaluate_expression(
             compiler,
             evaluator,
         ),
+        SyntaxNodeKind::FieldAccess(field_access_node) => evaluate_field_access(
+            &field_access_node,
+            compiler.nodes.type_of(expression),
+            compiler,
+            evaluator,
+        ),
     }
+}
+
+fn evaluate_field_access(
+    field_access_node: &FieldAccessNode<Bound>,
+    type_: TypeId,
+    compiler: &mut Compiler,
+    evaluator: &mut ConstEvaluator,
+) -> Option<Value> {
+    let base_type = compiler.nodes.type_of(field_access_node.base);
+    let Some(base) = evaluate_expression(field_access_node.base, compiler, evaluator)?.as_ptr()
+    else {
+        return Some(Value::Error);
+    };
+    let Some(offset) = compiler
+        .types
+        .as_struct_type(base_type)
+        .unwrap()
+        .layout
+        .offset_of(field_access_node.field)
+    else {
+        return Some(Value::Error);
+    };
+    let mut buffer = [0u8; 4];
+    compiler.const_memory.read(base + offset, &mut buffer);
+    let buf_u8 = buffer[0];
+    let buf_u16 = u16::from_le_bytes(buffer.as_chunks::<2>().0[0]);
+    let buf_u32 = u32::from_le_bytes(buffer);
+    Some(match &compiler.types[type_] {
+        Type::Error => Value::Error,
+        Type::Unknown => Value::Error,
+        Type::Void => Value::Error,
+        Type::Type => Value::Error,
+        Type::FunctionType(..) => Value::Error,
+        Type::Bool => Value::Bool(buf_u8 == 1),
+        Type::UnsignedInteger8 => Value::UnsignedInteger8(buf_u8),
+        Type::UnsignedInteger16 => Value::UnsignedInteger16(buf_u16),
+        Type::Array(..) | Type::Struct(_) | Type::Pointer => Value::Pointer(buf_u32 as _),
+        Type::UnsignedInteger32 => Value::UnsignedInteger32(buf_u32 as _),
+    })
 }
 
 fn evaluate_struct_literal(

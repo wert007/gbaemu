@@ -399,6 +399,28 @@ impl SyntaxNode<Bound> {
             },
         }
     }
+
+    pub(crate) fn field_access(
+        location: Location,
+        base: BoundId,
+        field: StringId,
+        type_: TypeId,
+        id: BoundId,
+    ) -> SyntaxNode<Bound> {
+        Self {
+            location,
+            kind: SyntaxNodeKind::FieldAccess(FieldAccessNode {
+                base,
+                period: (),
+                field,
+            }),
+            stage: Bound {
+                id,
+                type_,
+                constant_value: None,
+            },
+        }
+    }
 }
 
 fn to_option(value: bool) -> Option<()> {
@@ -537,6 +559,23 @@ impl SyntaxNode<Parsed> {
         }
     }
 
+    pub(crate) fn field_access(
+        base: SyntaxNode<Parsed>,
+        period: Token,
+        field: Token,
+    ) -> SyntaxNode<Parsed> {
+        let location = base.location().combine(field.location());
+        Self {
+            location,
+            stage: Parsed,
+            kind: SyntaxNodeKind::FieldAccess(FieldAccessNode {
+                base: Box::new(base),
+                period,
+                field,
+            }),
+        }
+    }
+
     pub(crate) fn struct_literal(
         identifier: Token,
         lbrace: Token,
@@ -671,6 +710,7 @@ pub enum SyntaxNodeKind<S: Stage> {
     Conversion(ConversionNode<S>),
     StructDeclaration(StructDeclarationNode<S>),
     StructLiteral(StructLiteralNode<S>),
+    FieldAccess(FieldAccessNode<S>),
 }
 
 #[derive(Debug, Clone)]
@@ -685,6 +725,13 @@ pub struct FunctionCallNode<S: Stage> {
     lparen: S::Token,
     pub arguments: Vec<S::ChildNode>,
     rparen: S::Token,
+}
+
+#[derive(Debug, Clone)]
+pub struct FieldAccessNode<S: Stage> {
+    pub base: S::ChildNodeBoxed,
+    period: S::Token,
+    pub field: S::IdentifierUnscoped,
 }
 
 #[derive(Debug, Clone)]

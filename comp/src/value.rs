@@ -60,4 +60,11 @@ impl Value {
             _ => None,
         }
     }
+
+    pub(crate) fn as_ptr(&self) -> Option<usize> {
+        match self {
+            Value::Pointer(it) => Some(*it),
+            _ => None,
+        }
+    }
 }

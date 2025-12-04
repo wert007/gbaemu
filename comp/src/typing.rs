@@ -222,6 +222,17 @@ impl Types {
             Type::Struct(struct_type) => struct_type.layout.size(),
         }
     }
+
+    pub(crate) fn field_type(
+        &self,
+        base_type: TypeId,
+        field_identifier: StringId,
+    ) -> Option<TypeId> {
+        match &self[base_type] {
+            Type::Struct(struct_type) => struct_type.get_field_type_by_name(field_identifier),
+            _ => None,
+        }
+    }
 }
 
 impl Index<TypeId> for Types {

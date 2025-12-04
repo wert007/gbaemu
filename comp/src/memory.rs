@@ -65,4 +65,14 @@ impl<S: Stage> Memoryblock<S> {
             crate::value::Value::Type(_) => {}
         }
     }
+
+    pub(crate) fn read<const N: usize>(&self, base: usize, buffer: &mut [u8; N]) -> usize {
+        for offset in 0..N {
+            if base + offset >= self.buffer.len() {
+                return offset;
+            }
+            buffer[offset] = self.buffer[base + offset];
+        }
+        return N;
+    }
 }
