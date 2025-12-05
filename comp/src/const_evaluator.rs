@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     BoundId, Compiler, StringId,
-    bind::VariableId,
+    bind::{VariableId, conversion::ConversionKind},
     syntax_tree::*,
     typing::{Type, TypeId},
     value::Value,
@@ -81,7 +81,12 @@ fn evaluate_expression(
             evaluate_expression(expression, compiler, evaluator)
         }
         SyntaxNodeKind::FunctionDeclaration(_) => None,
-        SyntaxNodeKind::Conversion(conversion_node) => todo!(),
+        SyntaxNodeKind::Conversion(conversion_node) => evaluate_conversion(
+            conversion_node,
+            compiler.nodes.type_of(expression),
+            compiler,
+            evaluator,
+        ),
         SyntaxNodeKind::StructDeclaration(_) => None,
         SyntaxNodeKind::StructLiteral(struct_literal_node) => evaluate_struct_literal(
             &struct_literal_node,
@@ -95,6 +100,27 @@ fn evaluate_expression(
             compiler,
             evaluator,
         ),
+    }
+}
+
+fn evaluate_conversion(
+    conversion_node: ConversionNode<Bound>,
+    target_type: TypeId,
+    compiler: &mut Compiler,
+    evaluator: &mut ConstEvaluator,
+) -> Option<Value> {
+    let base = evaluate_expression(conversion_node.base, compiler, evaluator)?;
+    match (conversion_node.conversion_kind, base, target_type) {
+        (ConversionKind::Implicit, Value::UnsignedInteger32(v), TypeId::UNSIGNED_INTEGER_8) => {
+            Some(Value::UnsignedInteger8(v as _))
+        }
+        (ConversionKind::Implicit, Value::UnsignedInteger32(v), TypeId::UNSIGNED_INTEGER_16) => {
+            Some(Value::UnsignedInteger16(v as _))
+        }
+        (ConversionKind::Implicit, Value::UnsignedInteger32(v), TypeId::UNSIGNED_INTEGER_32) => {
+            Some(Value::UnsignedInteger32(v as _))
+        }
+        _ => unreachable!("Impossible conversion!"),
     }
 }
 
@@ -124,6 +150,7 @@ fn evaluate_field_access(
     let buf_u16 = u16::from_le_bytes(buffer.as_chunks::<2>().0[0]);
     let buf_u32 = u32::from_le_bytes(buffer);
     Some(match &compiler.types[type_] {
+        Type::IntegerLiteral(_) => unreachable!("Should be resolved!"),
         Type::Error => Value::Error,
         Type::Unknown => Value::Error,
         Type::Void => Value::Error,
@@ -241,6 +268,7 @@ fn evaluate_function_call(
             .types
             .as_function_type(type_)
             .expect("Function type");
+        assert_eq!(function_type.parameters.len(), arguments.len());
         for (p, a) in function_type.parameters.iter().zip(arguments) {
             evaluator.assign_variable(*p, a);
         }

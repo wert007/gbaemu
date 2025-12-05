@@ -751,8 +751,8 @@ pub enum SyntaxNodeKind<S: Stage> {
 
 #[derive(Debug, Clone)]
 pub struct ConversionNode<S: Stage> {
-    base: S::ChildNodeBoxed,
-    conversion_kind: ConversionKind,
+    pub base: S::ChildNodeBoxed,
+    pub conversion_kind: ConversionKind,
 }
 
 #[derive(Debug, Clone)]

@@ -344,9 +344,9 @@ impl Binder {
         match token.kind {
             TokenKind::Error => SyntaxNode::<Bound>::error(token.location(), id),
             TokenKind::Integer => {
-                let lexeme = &compiler[token.location()];
                 let (value, type_) = match expected {
                     TypeId::UNSIGNED_INTEGER_8 => {
+                        let lexeme = &compiler[token.location()];
                         let expected = TypeId::UNSIGNED_INTEGER_8;
                         let value = lexeme
                             .parse::<u8>()
@@ -361,6 +361,7 @@ impl Binder {
                         (value, expected)
                     }
                     TypeId::UNSIGNED_INTEGER_16 => {
+                        let lexeme = &compiler[token.location()];
                         let expected = TypeId::UNSIGNED_INTEGER_16;
                         let value = lexeme
                             .parse::<u16>()
@@ -374,8 +375,26 @@ impl Binder {
                             });
                         (value, expected)
                     }
-                    TypeId::UNSIGNED_INTEGER_32 | TypeId::UNKNOWN | _ => {
+                    TypeId::UNSIGNED_INTEGER_32 => {
+                        let lexeme = &compiler[token.location()];
                         let expected = TypeId::UNSIGNED_INTEGER_32;
+                        let value = lexeme
+                            .parse::<u32>()
+                            .map(|v| Value::UnsignedInteger32(v))
+                            .unwrap_or_else(|_| {
+                                compiler.diagnostics.report_cannot_parse_integer_literal_to(
+                                    token.location(),
+                                    expected,
+                                );
+                                Value::Error
+                            });
+                        (value, expected)
+                    }
+                    TypeId::UNKNOWN | _ => {
+                        let lexeme = &compiler[token.location()];
+                        let value = lexeme.parse::<u32>().unwrap_or(u32::MAX);
+                        let expected = compiler.types.register(Type::IntegerLiteral(value as _));
+                        let lexeme = &compiler[token.location()];
                         let value = lexeme
                             .parse::<u32>()
                             .map(|v| Value::UnsignedInteger32(v))
@@ -463,6 +482,7 @@ impl Binder {
         assert_eq!(expected, TypeId::VOID);
         let expression_location = const_declaration_node.expr.location();
         let expression = self.bind_node(*const_declaration_node.expr, TypeId::UNKNOWN, compiler);
+        let expression = self.remove_integer_literal_type(expression, compiler);
         // let variable = &compiler[];
         let variable_location = const_declaration_node.identifier.location();
         let variable = compiler.intern_location(variable_location);
@@ -575,7 +595,10 @@ impl Binder {
             .into_iter()
             .map(|e|
             // TODO: Use correct expected Type here!
-            self.bind_node(e, TypeId::UNKNOWN, compiler))
+            {
+                let entry = self.bind_node(e, TypeId::UNKNOWN, compiler);
+                self.remove_integer_literal_type(entry, compiler)
+            })
             .collect();
         let inner_type = entries
             .iter()
@@ -1016,5 +1039,22 @@ impl Binder {
 
     fn pop_namespace(&mut self) {
         self.namespaces.pop();
+    }
+
+    fn remove_integer_literal_type(
+        &mut self,
+        expression: BoundId,
+        compiler: &mut Compiler,
+    ) -> BoundId {
+        if compiler.types[compiler.nodes.type_of(expression)].is_integer_literal() {
+            self.bind_conversion(
+                expression,
+                TypeId::UNSIGNED_INTEGER_32,
+                compiler,
+                ConversionKind::Implicit,
+            )
+        } else {
+            expression
+        }
     }
 }

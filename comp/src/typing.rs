@@ -27,11 +27,20 @@ pub enum Type {
     UnsignedInteger8,
     UnsignedInteger16,
     UnsignedInteger32,
+    IntegerLiteral(usize),
     Bool,
     Array(TypeId, usize),
     FunctionType(FunctionType),
     Struct(StructType),
     Reference(TypeId),
+}
+impl Type {
+    pub(crate) fn is_integer_literal(&self) -> bool {
+        match self {
+            Type::IntegerLiteral(_) => true,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -185,6 +194,7 @@ impl Types {
             Type::UnsignedInteger8 => write!(f, "u8"),
             Type::UnsignedInteger16 => write!(f, "u16"),
             Type::UnsignedInteger32 => write!(f, "u32"),
+            Type::IntegerLiteral(_) => write!(f, "{{integer literal}}"),
             Type::Bool => write!(f, "bool"),
             Type::Array(type_, len) => {
                 write!(f, "[")?;
@@ -234,6 +244,7 @@ impl Types {
             Type::Array(type_id, len) => self.size_of(*type_id) * len,
             Type::FunctionType(..) => 0,
             Type::Struct(struct_type) => struct_type.layout.size(),
+            Type::IntegerLiteral(_) => unreachable!("This should be unreachable?"),
         }
     }
 
