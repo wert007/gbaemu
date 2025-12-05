@@ -54,9 +54,12 @@ fn evaluate_expression(
         SyntaxNodeKind::ArrayLiteral(array_literal_node) => {
             evaluate_array_literal(&array_literal_node, compiler, evaluator)
         }
-        SyntaxNodeKind::FunctionCall(function_call_node) => {
-            evaluate_function_call(&function_call_node, compiler, evaluator)
-        }
+        SyntaxNodeKind::FunctionCall(function_call_node) => evaluate_function_call(
+            &function_call_node,
+            compiler.nodes.type_of(expression),
+            compiler,
+            evaluator,
+        ),
         SyntaxNodeKind::BlockExpression(block_expression_node) => {
             evaluate_block_expression(&block_expression_node, compiler, evaluator)
         }
@@ -126,6 +129,7 @@ fn evaluate_field_access(
         Type::Void => Value::Error,
         Type::Type => Value::Error,
         Type::FunctionType(..) => Value::Error,
+        Type::Reference(_) => Value::Error,
         Type::Bool => Value::Bool(buf_u8 == 1),
         Type::UnsignedInteger8 => Value::UnsignedInteger8(buf_u8),
         Type::UnsignedInteger16 => Value::UnsignedInteger16(buf_u16),
@@ -217,9 +221,11 @@ fn evaluate_block_expression(
 
 fn evaluate_function_call(
     function_call_node: &FunctionCallNode<Bound>,
+    type_: TypeId,
     compiler: &mut Compiler,
     evaluator: &mut ConstEvaluator,
 ) -> Option<Value> {
+    let type_ = compiler.nodes.type_of(function_call_node.base);
     let base = evaluate_expression(function_call_node.base, compiler, evaluator)?;
     let arguments: Option<Vec<Value>> = function_call_node
         .arguments
@@ -231,7 +237,13 @@ fn evaluate_function_call(
     if base.is_error() || arguments.iter().any(|v| v.is_error()) {
         Some(Value::Error)
     } else {
-        assert_eq!(arguments.len(), 0);
+        let function_type = compiler
+            .types
+            .as_function_type(type_)
+            .expect("Function type");
+        for (p, a) in function_type.parameters.iter().zip(arguments) {
+            evaluator.assign_variable(*p, a);
+        }
         evaluate_expression(base.as_bound_id().unwrap(), compiler, evaluator)
     }
 }

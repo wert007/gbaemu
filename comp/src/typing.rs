@@ -29,9 +29,18 @@ pub enum Type {
     UnsignedInteger32,
     Bool,
     Array(TypeId, usize),
-    FunctionType(Vec<TypeId>, TypeId),
+    FunctionType(FunctionType),
     Struct(StructType),
     Reference(TypeId),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FunctionType {
+    // pub name: StringId,
+    pub identifier: StringId,
+    pub parameters: Vec<VariableId>,
+    pub parameter_types: Vec<TypeId>,
+    pub return_type: TypeId,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -155,8 +164,8 @@ impl Types {
     }
 
     pub(crate) fn return_type_of(&self, type_: TypeId) -> Option<TypeId> {
-        match self[type_] {
-            Type::FunctionType(_, type_) => Some(type_),
+        match &self[type_] {
+            Type::FunctionType(f) => Some(f.return_type),
             _ => None,
         }
     }
@@ -182,16 +191,16 @@ impl Types {
                 self.fmt_type(*type_, f, strings)?;
                 write!(f, "; {len}]")
             }
-            Type::FunctionType(parameter, return_type) => {
+            Type::FunctionType(ft) => {
                 write!(f, "Fn<(")?;
-                for (i, parameter) in parameter.iter().enumerate() {
+                for (i, parameter) in ft.parameter_types.iter().enumerate() {
                     if i != 0 {
                         write!(f, ", ")?;
                     }
                     self.fmt_type(*parameter, f, strings)?;
                 }
                 write!(f, "), ")?;
-                self.fmt_type(*return_type, f, strings)?;
+                self.fmt_type(ft.return_type, f, strings)?;
                 write!(f, ">")
             }
             Type::Struct(struct_) => {
@@ -235,6 +244,13 @@ impl Types {
     ) -> Option<TypeId> {
         match &self[base_type] {
             Type::Struct(struct_type) => struct_type.get_field_type_by_name(field_identifier),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn as_function_type(&self, id: TypeId) -> Option<&FunctionType> {
+        match &self[id] {
+            Type::FunctionType(f) => Some(f),
             _ => None,
         }
     }

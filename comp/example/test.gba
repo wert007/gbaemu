@@ -17,16 +17,22 @@ comp fn j<out len: u16>(): [u8; len] {
 
 const k = j();
 
+fn n(a: u8): u8 {
+    a * 2
+}
+
+const o = n(2);
+
 struct Pos {
     x: u8,
     y: u8,
 }
 
-impl Pos {
-    fn todo_support_functions_shadowing_fields(this: &Pos): u8 {
-        this.x
-    }
-}
+// impl Pos {
+//    fn todo_support_functions_shadowing_fields(this: &Pos): u8 {
+//        this.x
+//    }
+//}
 
 struct A {
     foo: ptr,

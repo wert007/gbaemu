@@ -9,7 +9,7 @@ use crate::{
     lexer::{Token, TokenKind},
     parser::Parser,
     syntax_tree::*,
-    typing::{StructLayout, StructType, Type, TypeId, Types},
+    typing::{FunctionType, StructLayout, StructType, Type, TypeId, Types},
     value::Value,
 };
 
@@ -685,7 +685,7 @@ impl Binder {
             .into_iter()
             .map(|p| self.bind_parameter(p, compiler))
             .collect();
-        let parameters = self.creates_scope(compiler, |b, c| {
+        let parameters: Vec<ParameterNode<Bound>> = self.creates_scope(compiler, |b, c| {
             // let generic_parameters = generic_parameters
             //     .into_iter()
             //     .map(|(l, n, t)| {
@@ -708,10 +708,12 @@ impl Binder {
             .return_type
             .map(|(_, t)| self.bind_type_identifier(t, compiler))
             .unwrap_or(TypeId::VOID);
-        let type_ = Type::FunctionType(
-            parameters_bound.iter().map(|(.., t)| *t).collect(),
+        let type_ = Type::FunctionType(FunctionType {
+            identifier,
+            parameters: parameters.iter().map(|p| p.identifier).collect(),
+            parameter_types: { parameters_bound.iter().map(|(.., t)| *t).collect() },
             return_type,
-        );
+        });
         let type_ = compiler.types.register(type_);
         let identifier = self
             .register_variable(identifier_location, identifier, type_)
