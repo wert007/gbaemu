@@ -58,8 +58,11 @@ impl BoundBinaryOperator {
 pub struct VariableDeclaration {
     pub location: Location,
     pub id: VariableId,
+    pub namespaces: Vec<StringId>,
     pub name: StringId,
     pub type_: TypeId,
+    pub scope: ScopeId,
+    pub can_be_overshadowed: bool,
 }
 
 impl HasLocation for VariableDeclaration {
@@ -68,57 +71,143 @@ impl HasLocation for VariableDeclaration {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ScopeId(usize);
+impl ScopeId {
+    fn increase(&mut self) {
+        self.0 += 1;
+    }
+}
+#[derive(Debug)]
+pub struct Scope {
+    id: ScopeId,
+    parents: Vec<ScopeId>,
+}
+
+impl Scope {
+    pub fn global() -> Self {
+        Scope {
+            id: ScopeId(0),
+            parents: Vec::new(),
+        }
+    }
+
+    fn create_child(&self, next_scope_id: &mut ScopeId) -> Scope {
+        let mut parents = self.parents.clone();
+        parents.push(self.id);
+        let id = *next_scope_id;
+        next_scope_id.increase();
+        Scope { id, parents }
+    }
+}
+
 #[derive(Debug)]
 pub struct Variables {
-    variables: Vec<VariableDeclaration>,
-    scopes: Vec<usize>,
+    variables: HashMap<ScopeId, Vec<VariableDeclaration>>,
+    active_scopes: Vec<Scope>,
+    next_scope_id: ScopeId,
+    next_variable_id: VariableId,
 }
 
 impl Variables {
     pub fn new() -> Self {
-        Self {
-            variables: Vec::new(),
-            scopes: Vec::new(),
-        }
+        let mut variables = HashMap::new();
+        let mut next_scope_id = ScopeId(0);
+        let global = Scope::global();
+        variables.insert(next_scope_id, Vec::new());
+        next_scope_id.increase();
+        let result = Self {
+            variables,
+            active_scopes: vec![global],
+            next_scope_id,
+            next_variable_id: VariableId(0),
+        };
+        result
     }
 
     pub fn register(
         &mut self,
         location: Location,
+        namespaces: &[StringId],
         name: StringId,
         type_: TypeId,
+        can_be_overshadowed: bool,
     ) -> Option<VariableId> {
-        let scope_start = self.scopes.last().copied().unwrap_or_default();
-        if self.variables[scope_start..].iter().any(|v| v.name == name) {
+        let current_scope = self
+            .active_scopes
+            .last()
+            .expect("There should always be a scope available!")
+            .id;
+        if self.variables[&current_scope]
+            .iter()
+            .any(|v| !v.can_be_overshadowed && v.name == name)
+        {
             None
         } else {
-            let index = self.variables.len();
-            self.variables.push(VariableDeclaration {
-                location,
-                id: VariableId(index),
-                name,
-                type_,
-            });
-            Some(VariableId(index))
+            let id = self.next_variable_id;
+            self.next_variable_id.increase();
+            self.variables
+                .get_mut(&current_scope)
+                .unwrap()
+                .push(VariableDeclaration {
+                    scope: current_scope,
+                    location,
+                    namespaces: namespaces.to_vec(),
+                    id,
+                    name,
+                    type_,
+                    can_be_overshadowed,
+                });
+            Some(id)
         }
     }
 
     fn find_by_name(&self, name: StringId) -> Option<&VariableDeclaration> {
-        self.variables.iter().find(|v| v.name == name)
+        for scope in self
+            .active_scopes
+            .last()
+            .expect("There should always be a scope available")
+            .parents
+            .iter()
+            .copied()
+            .rev()
+            .chain(std::iter::once(
+                self.active_scopes
+                    .last()
+                    .expect("There should always be a scope available")
+                    .id,
+            ))
+        {
+            if let Some(it) = self.variables[&scope].iter().find(|v| v.name == name) {
+                return Some(it);
+            }
+        }
+        None
     }
 
     fn start_scope(&mut self) {
-        self.scopes.push(self.variables.len());
+        let child = self
+            .active_scopes
+            .last()
+            .expect("There should always be a scope available!")
+            .create_child(&mut self.next_scope_id);
+        self.variables.insert(child.id, Vec::new());
+        self.active_scopes.push(child);
     }
 
     fn end_scope(&mut self) {
-        let Some(end) = self.scopes.pop() else { return };
-        self.variables.drain(end..);
+        self.active_scopes.pop();
+        assert!(self.active_scopes.len() >= 1);
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct VariableId(usize);
+impl VariableId {
+    fn increase(&mut self) {
+        self.0 += 1;
+    }
+}
 
 #[derive(Debug)]
 pub struct Binder {
@@ -398,7 +487,8 @@ impl Binder {
         variable_name: StringId,
         type_: TypeId,
     ) -> Option<VariableId> {
-        self.variables.register(location, variable_name, type_)
+        self.variables
+            .register(location, &self.namespaces, variable_name, type_, true)
     }
 
     fn register_constant(&mut self, variable: VariableId, value: Value) {
