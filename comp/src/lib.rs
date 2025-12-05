@@ -11,6 +11,8 @@ use crate::{
     value::Value,
 };
 
+pub mod debug;
+
 mod bind;
 mod const_evaluator;
 mod diagnostics;

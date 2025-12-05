@@ -74,14 +74,17 @@ impl HasLocation for VariableDeclaration {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ScopeId(usize);
 impl ScopeId {
+    pub fn as_raw(&self) -> usize {
+        self.0
+    }
     fn increase(&mut self) {
         self.0 += 1;
     }
 }
 #[derive(Debug)]
 pub struct Scope {
-    id: ScopeId,
-    parents: Vec<ScopeId>,
+    pub(crate) id: ScopeId,
+    pub(crate) parents: Vec<ScopeId>,
 }
 
 impl Scope {
@@ -103,8 +106,8 @@ impl Scope {
 
 #[derive(Debug)]
 pub struct Variables {
-    variables: HashMap<ScopeId, Vec<VariableDeclaration>>,
-    active_scopes: Vec<Scope>,
+    pub(crate) variables: HashMap<ScopeId, Vec<VariableDeclaration>>,
+    pub(crate) active_scopes: Vec<Scope>,
     next_scope_id: ScopeId,
     next_variable_id: VariableId,
 }
@@ -230,7 +233,8 @@ impl Binder {
     pub fn bind(mut self, compiler: &mut Compiler) -> BoundId {
         let tree = Parser::new(self.file).parse(compiler);
         let node = self.bind_node(tree.node, TypeId::VOID, compiler);
-        dbg!(self.constants);
+        // dbg!(self.constants);
+        self.variables.dump(&compiler.strings, &compiler.types);
         node
     }
 

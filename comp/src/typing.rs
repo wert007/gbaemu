@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ops::Index};
+use std::{collections::HashMap, fmt::Formatter, ops::Index};
 
 use crate::{Location, StringId, StringInterner, bind::VariableId};
 
