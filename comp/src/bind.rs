@@ -98,8 +98,8 @@ impl Scope {
     fn create_child(&self, next_scope_id: &mut ScopeId) -> Scope {
         let mut parents = self.parents.clone();
         parents.push(self.id);
-        let id = *next_scope_id;
         next_scope_id.increase();
+        let id = *next_scope_id;
         Scope { id, parents }
     }
 }
@@ -107,22 +107,21 @@ impl Scope {
 #[derive(Debug)]
 pub struct Variables {
     pub(crate) variables: HashMap<ScopeId, Vec<VariableDeclaration>>,
-    pub(crate) active_scopes: Vec<Scope>,
-    next_scope_id: ScopeId,
+    pub(crate) all_scopes: Vec<Scope>,
+    pub(crate) active_scope: ScopeId,
     next_variable_id: VariableId,
 }
 
 impl Variables {
     pub fn new() -> Self {
         let mut variables = HashMap::new();
-        let mut next_scope_id = ScopeId(0);
+        let active_scope = ScopeId(0);
         let global = Scope::global();
-        variables.insert(next_scope_id, Vec::new());
-        next_scope_id.increase();
+        variables.insert(active_scope, Vec::new());
         let result = Self {
             variables,
-            active_scopes: vec![global],
-            next_scope_id,
+            all_scopes: vec![global],
+            active_scope,
             next_variable_id: VariableId(0),
         };
         result
@@ -136,11 +135,7 @@ impl Variables {
         type_: TypeId,
         can_be_overshadowed: bool,
     ) -> Option<VariableId> {
-        let current_scope = self
-            .active_scopes
-            .last()
-            .expect("There should always be a scope available!")
-            .id;
+        let current_scope = self.active_scope;
         if self.variables[&current_scope]
             .iter()
             .any(|v| !v.can_be_overshadowed && v.name == name)
@@ -166,21 +161,7 @@ impl Variables {
     }
 
     fn find_by_name(&self, name: StringId) -> Option<&VariableDeclaration> {
-        for scope in self
-            .active_scopes
-            .last()
-            .expect("There should always be a scope available")
-            .parents
-            .iter()
-            .copied()
-            .rev()
-            .chain(std::iter::once(
-                self.active_scopes
-                    .last()
-                    .expect("There should always be a scope available")
-                    .id,
-            ))
-        {
+        for scope in self.visible_scopes() {
             if let Some(it) = self.variables[&scope].iter().find(|v| v.name == name) {
                 return Some(it);
             }
@@ -189,18 +170,41 @@ impl Variables {
     }
 
     fn start_scope(&mut self) {
-        let child = self
-            .active_scopes
-            .last()
-            .expect("There should always be a scope available!")
-            .create_child(&mut self.next_scope_id);
-        self.variables.insert(child.id, Vec::new());
-        self.active_scopes.push(child);
+        let mut scope = ScopeId(self.all_scopes.len() - 1);
+        let child = self.active_scope().create_child(&mut scope);
+        self.active_scope = scope;
+        self.variables.insert(scope, Vec::new());
+        self.all_scopes.push(child);
     }
 
     fn end_scope(&mut self) {
-        self.active_scopes.pop();
-        assert!(self.active_scopes.len() >= 1);
+        self.active_scope = self.visible_scopes().skip(1).next().unwrap();
+    }
+
+    fn visible_scopes(&self) -> ScopeIter<'_> {
+        ScopeIter {
+            current: Some(self.active_scope),
+            all_scopes: &self.all_scopes,
+        }
+    }
+
+    fn active_scope(&self) -> &Scope {
+        &self.all_scopes[self.active_scope.0]
+    }
+}
+
+struct ScopeIter<'a> {
+    current: Option<ScopeId>,
+    all_scopes: &'a [Scope],
+}
+
+impl<'a> Iterator for ScopeIter<'a> {
+    type Item = ScopeId;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let result = self.current.take()?;
+        self.current = self.all_scopes[result.0].parents.last().copied();
+        Some(result)
     }
 }
 
@@ -576,10 +580,9 @@ impl Binder {
         let inner_type = entries
             .iter()
             .map(|e| compiler.nodes.type_of(*e))
-            .fold(TypeId::UNKNOWN, |acc, cur| acc);
+            .fold(TypeId::UNKNOWN, |acc, cur| cur);
         let length = entries.len();
         let type_ = compiler.types.register(Type::Array(inner_type, length));
-        assert!(type_ == expected || expected == TypeId::UNKNOWN);
         SyntaxNode::<Bound>::array_literal(entries, type_, location, id)
     }
 
@@ -994,7 +997,7 @@ impl Binder {
             dbg!(&f.identifier, f.body);
         }
         self.pop_namespace();
-        dbg!(&self.constants);
+        self.variables.dump(&compiler.strings, &compiler.types);
         todo!()
     }
 

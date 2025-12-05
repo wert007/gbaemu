@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use crate::{
     StringInterner,
-    bind::Variables,
+    bind::{ScopeId, Variables},
     typing::{TypeId, Types},
 };
 
@@ -20,7 +20,7 @@ impl Display for TypeToString<'_, '_> {
 
 impl Variables {
     pub fn dump(&self, strings: &StringInterner, types: &Types) {
-        for scope in &self.active_scopes {
+        for scope in &self.all_scopes {
             eprintln!(
                 " -- Scope {} ({} Variables) -- ",
                 scope.id.as_raw(),
