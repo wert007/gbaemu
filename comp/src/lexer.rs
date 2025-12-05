@@ -26,6 +26,7 @@ impl Token {
             '*' => TokenKind::Asterisk,
             '/' => TokenKind::Slash,
             '%' => TokenKind::Percent,
+            '&' => TokenKind::Ampersand,
             '{' => TokenKind::LBrace,
             '}' => TokenKind::RBrace,
             '<' => TokenKind::LessThan,
@@ -64,6 +65,8 @@ impl Token {
             "comp" => TokenKind::CompKeyword,
             "fn" => TokenKind::FnKeyword,
             "struct" => TokenKind::StructKeyword,
+            "impl" => TokenKind::ImplKeyword,
+            "this" => TokenKind::ThisKeyword,
             _ => TokenKind::Identifier,
         };
         Self {
@@ -112,6 +115,9 @@ pub enum TokenKind {
     LessThan,
     GreaterThan,
     Period,
+    ImplKeyword,
+    ThisKeyword,
+    Ampersand,
 }
 impl TokenKind {
     pub(crate) fn binary_precedence(&self) -> Option<(usize, usize)> {
@@ -155,6 +161,9 @@ impl TokenKind {
             TokenKind::RBrace => "}",
             TokenKind::LessThan => "<",
             TokenKind::GreaterThan => ">",
+            TokenKind::ImplKeyword => "impl keyword",
+            TokenKind::ThisKeyword => "this keyword",
+            TokenKind::Ampersand => "&",
         }
     }
 }

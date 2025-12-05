@@ -22,15 +22,15 @@ struct Pos {
     y: u8,
 }
 
-impl Pos {
-    fn x(&this): u8 {
-        this.x
-    }
-}
+//impl Pos {
+//    fn todo_support_functions_shadowing_fields(&this): u8 {
+//        this.x
+//    }
+//}
 
 struct A {
     foo: ptr,
 }
 
 const l = Pos { x: 255, y: 127 };
-const m = l.x();
+//const m = l.todo_support_functions_shadowing_fields();

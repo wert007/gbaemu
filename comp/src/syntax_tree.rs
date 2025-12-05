@@ -521,6 +521,27 @@ impl SyntaxNode<Parsed> {
         }
     }
 
+    pub(crate) fn impl_block(
+        impl_keyword: Token,
+        identifier: Token,
+        lbrace: Token,
+        body: Vec<SyntaxNode<Parsed>>,
+        rbrace: Token,
+    ) -> SyntaxNode<Parsed> {
+        let location = impl_keyword.location().combine(rbrace.location());
+        Self {
+            location,
+            stage: Parsed,
+            kind: SyntaxNodeKind::ImplBlock(ImplBlockNode {
+                impl_keyword,
+                identifier,
+                lbrace,
+                body,
+                rbrace,
+            }),
+        }
+    }
+
     pub(crate) fn assignment_statement(
         lhs: SyntaxNode<Parsed>,
         equals: Token,
@@ -711,6 +732,7 @@ pub enum SyntaxNodeKind<S: Stage> {
     StructDeclaration(StructDeclarationNode<S>),
     StructLiteral(StructLiteralNode<S>),
     FieldAccess(FieldAccessNode<S>),
+    ImplBlock(ImplBlockNode<S>),
 }
 
 #[derive(Debug, Clone)]
@@ -756,6 +778,15 @@ pub struct FunctionDeclarationNode<S: Stage> {
     pub identifier: S::Identifier,
     pub head: FunctionHeaderNode<S>,
     pub body: S::ChildNodeBoxed,
+}
+
+#[derive(Debug, Clone)]
+pub struct ImplBlockNode<S: Stage> {
+    impl_keyword: S::Token,
+    pub identifier: S::Identifier,
+    lbrace: S::Token,
+    pub body: Vec<S::ChildNode>,
+    rbrace: S::Token,
 }
 
 #[derive(Debug, Clone)]
@@ -1015,6 +1046,13 @@ impl<S: Stage> SyntaxNodeKind<S> {
             SyntaxNodeKind::CommaedExpression((_, c)) => c.is_some(),
             // SyntaxNodeKind::Parameter(p) => p.comma.is_some(),
             _ => false,
+        }
+    }
+
+    pub(crate) fn as_function_declaration(&self) -> Option<&FunctionDeclarationNode<S>> {
+        match self {
+            Self::FunctionDeclaration(it) => Some(it),
+            _ => None,
         }
     }
 }

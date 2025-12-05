@@ -125,6 +125,7 @@ pub struct Binder {
     file: SourceTextId,
     variables: Variables,
     constants: HashMap<VariableId, Value>,
+    namespaces: Vec<StringId>,
 }
 
 impl Binder {
@@ -133,6 +134,7 @@ impl Binder {
             file,
             variables: Variables::new(),
             constants: HashMap::new(),
+            namespaces: Vec::new(),
         }
     }
 
@@ -195,6 +197,9 @@ impl Binder {
                 ),
             SyntaxNodeKind::StructDeclaration(struct_declaration_node) => self
                 .bind_struct_declaration(struct_declaration_node, expected, location, compiler, id),
+            SyntaxNodeKind::ImplBlock(impl_block_node) => {
+                self.bind_impl_block(impl_block_node, expected, location, compiler, id)
+            }
             SyntaxNodeKind::FunctionCall(function_call_node) => {
                 self.bind_function_call(function_call_node, expected, location, compiler, id)
             }
@@ -863,5 +868,47 @@ impl Binder {
                 SyntaxNode::<Bound>::error(location, id)
             }
         }
+    }
+
+    fn bind_impl_block(
+        &mut self,
+        impl_block_node: ImplBlockNode<Parsed>,
+        expected: TypeId,
+        location: Location,
+        compiler: &mut Compiler,
+        id: BoundId,
+    ) -> SyntaxNode<Bound> {
+        let identifier = compiler.intern_location(impl_block_node.identifier.location());
+        let struct_type = self.look_up_variable_by_name(identifier).unwrap();
+        let type_ = self
+            .look_up_constant(struct_type.id)
+            .unwrap()
+            .as_type()
+            .unwrap();
+        let struct_type = compiler.types.as_struct_type(type_).unwrap();
+        self.push_namespace(identifier);
+        let functions: Vec<BoundId> = impl_block_node
+            .body
+            .into_iter()
+            .map(|f| self.bind_node(f, TypeId::VOID, compiler))
+            .collect();
+        for f in functions {
+            let f = compiler.nodes[f]
+                .kind
+                .as_function_declaration()
+                .expect("Only supported for now!");
+            dbg!(&f.identifier, f.body);
+        }
+        self.pop_namespace();
+        dbg!(&self.constants);
+        todo!()
+    }
+
+    fn push_namespace(&mut self, namespace: StringId) {
+        self.namespaces.push(namespace);
+    }
+
+    fn pop_namespace(&mut self) {
+        self.namespaces.pop();
     }
 }

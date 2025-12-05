@@ -64,7 +64,7 @@ struct Color {
     raw: u32,
 }
 
-comp fn compress<uncompressed_length: u16, out compressed_length>(bytes: [u8; uncompressed_length]): [u8; compressed_length] {
+comp fn compress<uncompressed_length: u16, out compressed_length: u16>(bytes: [u8; uncompressed_length]): [u8; compressed_length] {
     comp {
     compressed_length = 1;
     }

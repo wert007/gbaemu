@@ -101,6 +101,7 @@ impl Parser {
     fn parse_top_level_statement(&mut self, compiler: &mut Compiler) -> SyntaxNode<Parsed> {
         match self.peek(0, compiler) {
             TokenKind::ConstKeyword => self.parse_const_declaration(compiler),
+            TokenKind::ImplKeyword => self.parse_impl_block(compiler),
             TokenKind::CompKeyword => match self.peek(1, compiler) {
                 TokenKind::FnKeyword => self.parse_function_declaration(compiler),
                 TokenKind::StructKeyword => self.parse_struct_declaration(compiler),
@@ -466,5 +467,16 @@ impl Parser {
         let expression = self.parse_expression(compiler);
         let comma = self.maybe_expect(TokenKind::Comma, compiler);
         FieldInitilizationNode::<Parsed>::new(identifier, colon, expression, comma)
+    }
+
+    fn parse_impl_block(&mut self, compiler: &mut Compiler) -> SyntaxNode<Parsed> {
+        let impl_keyword = self.expect(TokenKind::ImplKeyword, compiler);
+        let identifier = self.expect(TokenKind::Identifier, compiler);
+        let lbrace = self.expect(TokenKind::LBrace, compiler);
+        let body = self.parse_until(TokenKind::RBrace, compiler, |p, c| {
+            p.parse_function_declaration(c)
+        });
+        let rbrace = self.expect(TokenKind::RBrace, compiler);
+        SyntaxNode::<Parsed>::impl_block(impl_keyword, identifier, lbrace, body, rbrace)
     }
 }
