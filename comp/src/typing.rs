@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Formatter, ops::Index};
+use std::{collections::HashMap, ops::Index};
 
 use crate::{Location, StringId, StringInterner, bind::VariableId};
 
@@ -31,6 +31,7 @@ pub enum Type {
     Array(TypeId, usize),
     FunctionType(Vec<TypeId>, TypeId),
     Struct(StructType),
+    Reference(TypeId),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -196,6 +197,10 @@ impl Types {
             Type::Struct(struct_) => {
                 write!(f, "{}", &strings[struct_.name])
             }
+            Type::Reference(reference) => {
+                write!(f, "&")?;
+                self.fmt_type(*reference, f, strings)
+            }
         }
     }
 
@@ -212,13 +217,13 @@ impl Types {
             Type::Unknown => 0,
             Type::Void => 0,
             Type::Type => 0,
-            Type::Pointer => 4,
+            Type::Reference(_) | Type::Pointer => 4,
             Type::UnsignedInteger8 => 1,
             Type::UnsignedInteger16 => 2,
             Type::UnsignedInteger32 => 4,
             Type::Bool => 1,
             Type::Array(type_id, len) => self.size_of(*type_id) * len,
-            Type::FunctionType(type_ids, type_id) => 0,
+            Type::FunctionType(..) => 0,
             Type::Struct(struct_type) => struct_type.layout.size(),
         }
     }

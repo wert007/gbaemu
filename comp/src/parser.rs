@@ -5,8 +5,8 @@ use crate::{
     lexer::{Lexer, Token, TokenKind},
     syntax_tree::{
         ArrayTypeIdentifier, FieldInitilizationNode, FunctionHeaderNode,
-        GenericParameterHeaderNode, GenericParameterNode, ParameterNode, Parsed, SyntaxNode,
-        SyntaxTree, TypeIdentifier,
+        GenericParameterHeaderNode, GenericParameterNode, NamedTypeIdentifier, ParameterNode,
+        Parsed, SyntaxNode, SyntaxTree, TypeIdentifier,
     },
 };
 
@@ -315,10 +315,14 @@ impl Parser {
 
     fn parse_type_identifier(&mut self, compiler: &mut Compiler) -> TypeIdentifier {
         let location = self.current(compiler).location();
+        let ampersand = self.maybe_expect(TokenKind::Ampersand, compiler);
         match self.peek(0, compiler) {
             TokenKind::Identifier => {
                 let identifier = self.expect(TokenKind::Identifier, compiler);
-                TypeIdentifier::Named(identifier)
+                TypeIdentifier::Named(NamedTypeIdentifier {
+                    ampersand,
+                    identifier,
+                })
             }
             TokenKind::LBracket => {
                 let lbracket = self.expect(TokenKind::LBracket, compiler);

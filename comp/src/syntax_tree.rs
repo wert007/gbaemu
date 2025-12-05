@@ -56,7 +56,7 @@ impl Stage for Bound {
 #[derive(Debug, Clone)]
 pub enum TypeIdentifier {
     Error(Location),
-    Named(Token),
+    Named(NamedTypeIdentifier),
     Array(ArrayTypeIdentifier),
 }
 
@@ -70,6 +70,20 @@ impl HasLocation for TypeIdentifier {
                 .location()
                 .combine(array_type_identifier.rbracket.location()),
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct NamedTypeIdentifier {
+    pub ampersand: Option<Token>,
+    pub identifier: Token,
+}
+
+impl HasLocation for NamedTypeIdentifier {
+    fn location(&self) -> Location {
+        self.identifier
+            .location()
+            .combine(self.ampersand.map(|a| a.location()))
     }
 }
 

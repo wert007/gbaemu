@@ -734,17 +734,24 @@ impl Binder {
     fn bind_type_identifier(&mut self, t: TypeIdentifier, compiler: &mut Compiler) -> TypeId {
         match t {
             TypeIdentifier::Error(_) => TypeId::ERROR,
-            TypeIdentifier::Named(name) => {
-                let name = compiler.intern_location(name.location());
-                match compiler.types.find_by_name(name) {
+            TypeIdentifier::Named(named) => {
+                let is_reference = named.ampersand.is_some();
+                let name = compiler.intern_location(named.identifier.location());
+                let type_ = match compiler.types.find_by_name(name) {
                     Some(it) => it,
                     None => {
                         compiler
                             .diagnostics
-                            .report_cannot_find_type(t.location(), name);
+                            .report_cannot_find_type(named.location(), name);
                         TypeId::ERROR
                     }
-                }
+                };
+                let type_ = if is_reference {
+                    compiler.types.register(Type::Reference(type_))
+                } else {
+                    type_
+                };
+                type_
             }
             TypeIdentifier::Array(array_type_identifier) => {
                 let length_location = array_type_identifier.length.location();
