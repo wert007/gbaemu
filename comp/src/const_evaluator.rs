@@ -2,10 +2,11 @@ use std::collections::HashMap;
 
 use crate::{
     BoundId, Compiler, StringId,
-    bind::{VariableId, conversion::ConversionKind},
+    bind::conversion::ConversionKind,
     syntax_tree::*,
     typing::{Type, TypeId},
     value::Value,
+    variables::VariableId,
 };
 
 #[derive(Debug)]
@@ -46,6 +47,8 @@ fn evaluate_expression(
     compiler: &mut Compiler,
     evaluator: &mut ConstEvaluator,
 ) -> Option<Value> {
+    // println!("Executing now:");
+    // crate::debug::dump_bound_tree(expression, compiler);
     if let Some(value) = compiler.nodes.constant_value(expression) {
         return Some(value.clone());
     }
@@ -54,12 +57,9 @@ fn evaluate_expression(
         SyntaxNodeKind::ArrayLiteral(array_literal_node) => {
             evaluate_array_literal(&array_literal_node, compiler, evaluator)
         }
-        SyntaxNodeKind::FunctionCall(function_call_node) => evaluate_function_call(
-            &function_call_node,
-            compiler.nodes.type_of(expression),
-            compiler,
-            evaluator,
-        ),
+        SyntaxNodeKind::FunctionCall(function_call_node) => {
+            evaluate_function_call(&function_call_node, compiler, evaluator)
+        }
         SyntaxNodeKind::BlockExpression(block_expression_node) => {
             evaluate_block_expression(&block_expression_node, compiler, evaluator)
         }
@@ -69,9 +69,7 @@ fn evaluate_expression(
         SyntaxNodeKind::AssignmentStatement(assignment_statement_node) => {
             evaluate_assignment_statement(&assignment_statement_node, compiler, evaluator)
         }
-        SyntaxNodeKind::Identifier(identifier) => {
-            evaluate_identifier(identifier, compiler, evaluator)
-        }
+        SyntaxNodeKind::Identifier(identifier) => evaluate_identifier(identifier, evaluator),
         SyntaxNodeKind::Error => Some(Value::Error),
         SyntaxNodeKind::Program(_) => None,
         SyntaxNodeKind::ConstDeclaration(_) => None,
@@ -189,11 +187,7 @@ fn evaluate_struct_literal(
     Some(Value::Pointer(base))
 }
 
-fn evaluate_identifier(
-    identifier: VariableId,
-    compiler: &mut Compiler,
-    evaluator: &mut ConstEvaluator,
-) -> Option<Value> {
+fn evaluate_identifier(identifier: VariableId, evaluator: &mut ConstEvaluator) -> Option<Value> {
     evaluator.read(identifier)
 }
 
@@ -248,7 +242,6 @@ fn evaluate_block_expression(
 
 fn evaluate_function_call(
     function_call_node: &FunctionCallNode<Bound>,
-    type_: TypeId,
     compiler: &mut Compiler,
     evaluator: &mut ConstEvaluator,
 ) -> Option<Value> {

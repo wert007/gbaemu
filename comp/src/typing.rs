@@ -1,6 +1,6 @@
-use std::{collections::HashMap, ops::Index};
+use std::{collections::HashMap, fmt::Display, ops::Index};
 
-use crate::{Location, StringId, StringInterner, bind::VariableId};
+use crate::{Location, StringId, StringInterner, variables::VariableId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TypeId(usize);
@@ -172,13 +172,6 @@ impl Types {
             .map(|(t, _)| *t)
     }
 
-    pub(crate) fn return_type_of(&self, type_: TypeId) -> Option<TypeId> {
-        match &self[type_] {
-            Type::FunctionType(f) => Some(f.return_type),
-            _ => None,
-        }
-    }
-
     pub(crate) fn fmt_type(
         &self,
         type_: TypeId,
@@ -265,6 +258,24 @@ impl Types {
             _ => None,
         }
     }
+
+    pub fn to_string(&self, id: TypeId, strings: &StringInterner) -> String {
+        format!(
+            "{}",
+            TypeToString {
+                types: self,
+                strings,
+                id,
+            }
+        )
+    }
+
+    pub(crate) fn as_inner_array_type(&self, id: TypeId) -> Option<TypeId> {
+        match &self[id] {
+            Type::Array(t, _) => Some(*t),
+            _ => None,
+        }
+    }
 }
 
 impl Index<TypeId> for Types {
@@ -272,5 +283,17 @@ impl Index<TypeId> for Types {
 
     fn index(&self, index: TypeId) -> &Self::Output {
         &self.types[index.0]
+    }
+}
+
+struct TypeToString<'a, 'b> {
+    types: &'a Types,
+    strings: &'b StringInterner,
+    id: TypeId,
+}
+
+impl Display for TypeToString<'_, '_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.types.fmt_type(self.id, f, self.strings)
     }
 }

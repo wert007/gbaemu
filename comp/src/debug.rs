@@ -1,23 +1,10 @@
-use std::fmt::Display;
-
 use crate::{
     BoundId, Compiler, HasLocation, StringInterner,
-    bind::{ScopeId, VariableId, Variables},
+    bind::BoundBinaryOperator,
     syntax_tree::{Parsed, SyntaxNode, SyntaxNodeKind, SyntaxTree},
     typing::{TypeId, Types},
+    variables::{VariableId, Variables},
 };
-
-struct TypeToString<'a, 'b> {
-    types: &'a Types,
-    strings: &'b StringInterner,
-    id: TypeId,
-}
-
-impl Display for TypeToString<'_, '_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.types.fmt_type(self.id, f, self.strings)
-    }
-}
 
 impl Variables {
     pub fn dump(&self, strings: &StringInterner, types: &Types) {
@@ -35,119 +22,105 @@ impl Variables {
                 }
                 name.push_str(&strings[variable.name]);
 
-                eprintln!(
-                    "    {name}: {}",
-                    TypeToString {
-                        types,
-                        id: variable.type_,
-                        strings
-                    }
-                );
+                eprintln!("    {name}: {}", types.to_string(variable.type_, strings));
             }
         }
     }
 }
 
-pub(crate) fn dump_bound_tree(node: BoundId, compiler: &Compiler, variables: &Variables) {
-    dump_bound_tree_recursive(node, compiler, variables, 0)
+pub(crate) fn dump_bound_tree(node: BoundId, compiler: &Compiler) {
+    // panic!();
+    dump_bound_tree_recursive(node, compiler, 0)
 }
 
-fn dump_bound_tree_recursive(
-    node: BoundId,
-    compiler: &Compiler,
-    variables: &Variables,
-    indent: usize,
-) {
-    let n = |v: VariableId| &compiler.strings[variables[v].name];
+fn dump_bound_tree_recursive(node: BoundId, compiler: &Compiler, indent: usize) {
+    let n = |v: VariableId| &compiler.strings[v];
+    let t = |v: TypeId| compiler.types.to_string(v, &compiler.strings);
     emit_indent(indent);
+    // dbg!(&compiler.nodes[node]);
+    let stage = &compiler.nodes[node].stage;
     match &compiler.nodes[node].kind {
-        SyntaxNodeKind::Error => print!("#error"),
+        SyntaxNodeKind::Error => println!("Error"),
         SyntaxNodeKind::Program(program_node) => {
+            println!("Program:");
             for statement in &program_node.top_level_statements {
-                dump_bound_tree_recursive(*statement, compiler, variables, indent);
+                dump_bound_tree_recursive(*statement, compiler, indent + 1);
             }
         }
         SyntaxNodeKind::ConstDeclaration(const_declaration_node) => {
-            print!(
-                "const {} = {:?}",
+            let ti = compiler
+                .variables
+                .type_of(const_declaration_node.identifier);
+            println!(
+                "const {}: {}= {:?};",
                 n(const_declaration_node.identifier),
+                t(ti),
                 const_declaration_node.expr
             );
-            // dump_bound_tree_recursive(const_declaration_node.expr, compiler, variables, 0);
-            println!(";");
         }
-        SyntaxNodeKind::Literal(literal) => {
-            print!("{}", &compiler[literal.location()]);
+        SyntaxNodeKind::Literal(_) => {
+            println!("Literal {:?}: {}", &stage.constant_value, t(stage.type_));
         }
         SyntaxNodeKind::Identifier(token) => {
-            print!("{}", n(*token),);
+            print!("{}: {}", n(*token), t(stage.type_));
         }
         SyntaxNodeKind::Binary(binary_node) => {
-            dump_bound_tree_recursive(binary_node.lhs, compiler, variables, 0);
             match binary_node.op {
-                crate::bind::BoundBinaryOperator::Addition => print!("+"),
-                crate::bind::BoundBinaryOperator::Subtraction => print!("-"),
-                crate::bind::BoundBinaryOperator::Multiplication => print!("*"),
-                crate::bind::BoundBinaryOperator::Division => print!("/"),
-                crate::bind::BoundBinaryOperator::Modulo => print!("%"),
+                BoundBinaryOperator::Addition => println!("Binary +"),
+                BoundBinaryOperator::Subtraction => println!("Binary -"),
+                BoundBinaryOperator::Multiplication => println!("Binary *"),
+                BoundBinaryOperator::Division => println!("Binary /"),
+                BoundBinaryOperator::Modulo => println!("Binary %"),
             }
-            dump_bound_tree_recursive(binary_node.rhs, compiler, variables, 0);
+            dump_bound_tree_recursive(binary_node.lhs, compiler, indent + 1);
+            dump_bound_tree_recursive(binary_node.rhs, compiler, indent + 1);
         }
         SyntaxNodeKind::CommaedExpression((expr, _)) => {
-            dump_bound_tree_recursive(*expr, compiler, variables, indent)
+            dump_bound_tree_recursive(*expr, compiler, 0)
         }
         SyntaxNodeKind::ArrayLiteral(array_literal_node) => {
-            print!("[ ");
+            println!("Array: {}", t(stage.type_));
             for entry in &array_literal_node.entries {
-                dump_bound_tree_recursive(*entry, compiler, variables, 0);
-                print!(", ");
+                dump_bound_tree_recursive(*entry, compiler, indent + 1);
             }
-            print!(" ]");
         }
         SyntaxNodeKind::ExpressionStatement(expression_statement_node) => {
-            dump_bound_tree_recursive(
-                expression_statement_node.expression,
-                compiler,
-                variables,
-                indent,
-            );
-            println!();
+            dump_bound_tree_recursive(expression_statement_node.expression, compiler, indent);
         }
         SyntaxNodeKind::BlockExpression(block_expression_node) => {
-            println!("{{");
+            println!("Block: {}", t(stage.type_));
             for s in &block_expression_node.body {
-                dump_bound_tree_recursive(*s, compiler, variables, indent + 1);
+                dump_bound_tree_recursive(*s, compiler, indent + 1);
             }
-            println!("}}");
         }
         SyntaxNodeKind::FunctionDeclaration(function_declaration_node) => {
-            println!("fn {}()", n(function_declaration_node.identifier));
+            println!("fn {}", n(function_declaration_node.identifier));
             // function_declaration_node.head.
-            dump_bound_tree_recursive(function_declaration_node.body, compiler, variables, indent);
+            dump_bound_tree_recursive(function_declaration_node.body, compiler, indent + 1);
         }
         SyntaxNodeKind::FunctionCall(function_call_node) => {
-            dump_bound_tree_recursive(function_call_node.base, compiler, variables, 0);
-            print!("(");
+            println!("FunctionCall");
+            println!("Base");
+            dump_bound_tree_recursive(function_call_node.base, compiler, indent + 1);
+            println!("Args");
             for arg in &function_call_node.arguments {
-                dump_bound_tree_recursive(*arg, compiler, variables, 0);
-                print!(", ")
+                dump_bound_tree_recursive(*arg, compiler, indent + 1);
             }
-            print!(")");
         }
         SyntaxNodeKind::AssignmentStatement(assignment_statement_node) => {
-            dump_bound_tree_recursive(assignment_statement_node.lhs, compiler, variables, 0);
-            print!(" = ");
-            dump_bound_tree_recursive(assignment_statement_node.value, compiler, variables, 0);
-            println!();
+            println!("Assignment");
+            dump_bound_tree_recursive(assignment_statement_node.lhs, compiler, indent + 1);
+            dump_bound_tree_recursive(assignment_statement_node.value, compiler, indent + 1);
         }
         SyntaxNodeKind::Conversion(conversion_node) => {
-            dump_bound_tree_recursive(conversion_node.base, compiler, variables, 0);
+            println!("Convert to {}", t(stage.type_));
+            dump_bound_tree_recursive(conversion_node.base, compiler, indent + 1);
         }
         SyntaxNodeKind::StructDeclaration(struct_declaration_node) => {
             println!("struct {}", n(struct_declaration_node.identifier));
             for field in &struct_declaration_node.fields {
                 emit_indent(indent + 1);
-                println!("{}: TODO", n(field.identifier))
+                println!("{}: {}", n(field.identifier), t(field.type_))
             }
         }
         SyntaxNodeKind::StructLiteral(struct_literal_node) => {
@@ -155,7 +128,7 @@ fn dump_bound_tree_recursive(
             for field in &struct_literal_node.fields {
                 emit_indent(indent + 1);
                 print!("{}:", &compiler.strings[field.identifier]);
-                dump_bound_tree_recursive(field.expression, compiler, variables, 0);
+                dump_bound_tree_recursive(field.expression, compiler, 0);
                 println!();
             }
         }
@@ -262,7 +235,10 @@ fn dump_parse_node(node: &SyntaxNode<Parsed>, compiler: &mut Compiler, indent: u
             dump_parse_node(&assignment_statement_node.lhs, compiler, indent + 1);
             dump_parse_node(&assignment_statement_node.value, compiler, indent + 1);
         }
-        SyntaxNodeKind::Conversion(conversion_node) => todo!(),
+        SyntaxNodeKind::Conversion(conversion_node) => {
+            println!("Cast {:?}", conversion_node.conversion_kind);
+            dump_parse_node(&conversion_node.base, compiler, indent + 1);
+        }
         SyntaxNodeKind::StructDeclaration(struct_declaration_node) => {
             println!(
                 "Struct {}",
@@ -288,7 +264,18 @@ fn dump_parse_node(node: &SyntaxNode<Parsed>, compiler: &mut Compiler, indent: u
                 dump_parse_node(&field.expression, compiler, indent + 1);
             }
         }
-        SyntaxNodeKind::FieldAccess(field_access_node) => todo!(),
-        SyntaxNodeKind::ImplBlock(impl_block_node) => todo!(),
+        SyntaxNodeKind::FieldAccess(field_access_node) => {
+            println!(
+                "Access field {} of",
+                &compiler[field_access_node.field.location()]
+            );
+            dump_parse_node(&field_access_node.base, compiler, indent + 1);
+        }
+        SyntaxNodeKind::ImplBlock(impl_block_node) => {
+            println!("Impl {}", &compiler[impl_block_node.identifier.location()]);
+            for node in &impl_block_node.body {
+                dump_parse_node(node, compiler, indent + 1);
+            }
+        }
     }
 }

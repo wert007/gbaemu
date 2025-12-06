@@ -1,7 +1,8 @@
 #![allow(dead_code)]
 use crate::StringId;
+use crate::bind::BoundBinaryOperator;
 use crate::bind::conversion::ConversionKind;
-use crate::bind::{BoundBinaryOperator, VariableId};
+use crate::variables::VariableId;
 use crate::{BoundId, HasLocation, Location, lexer::Token, typing::TypeId, value::Value};
 use std::fmt::Debug;
 use std::marker::PhantomData;
@@ -196,7 +197,7 @@ impl SyntaxNode<Bound> {
 
     pub(crate) fn variable(
         location: Location,
-        variable: &crate::bind::VariableDeclaration,
+        variable: &crate::variables::VariableDeclaration,
         constant_value: Option<Value>,
         id: BoundId,
     ) -> SyntaxNode<Bound> {

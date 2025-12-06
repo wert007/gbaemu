@@ -45,7 +45,7 @@ impl Token {
         }
     }
 
-    fn multi_char(location: Location, cur: &[char]) -> Token {
+    fn multi_char(_location: Location, _cur: &[char]) -> Token {
         todo!()
     }
 

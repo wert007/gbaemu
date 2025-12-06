@@ -273,6 +273,16 @@ impl Diagnostic {
             message: dgnst!("Cannot call ", type_, " since it is not a function."),
         }
     }
+
+    fn remove_semicolon(location: Location, expected: TypeId) -> Diagnostic {
+        Self {
+            location,
+            message: dgnst!(
+                "Hint: remove this semicolon, so this expression value is of type ",
+                expected
+            ),
+        }
+    }
 }
 
 pub struct Diagnostics {
@@ -411,5 +421,10 @@ impl Diagnostics {
     pub(crate) fn report_invalid_function_type(&mut self, location: Location, type_: TypeId) {
         self.diagnostics
             .push(Diagnostic::invalid_function_type(location, type_))
+    }
+
+    pub(crate) fn hint_remove_semicolon(&mut self, location: Location, expected: TypeId) {
+        self.diagnostics
+            .push(Diagnostic::remove_semicolon(location, expected));
     }
 }

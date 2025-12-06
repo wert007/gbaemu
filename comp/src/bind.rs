@@ -11,6 +11,7 @@ use crate::{
     syntax_tree::*,
     typing::{FunctionType, StructLayout, StructType, Type, TypeId, Types},
     value::Value,
+    variables::{VariableDeclaration, VariableId, Variables},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,184 +56,8 @@ impl BoundBinaryOperator {
 }
 
 #[derive(Debug)]
-pub struct VariableDeclaration {
-    pub location: Location,
-    pub id: VariableId,
-    pub namespaces: Vec<StringId>,
-    pub name: StringId,
-    pub type_: TypeId,
-    pub scope: ScopeId,
-    pub can_be_overshadowed: bool,
-}
-
-impl HasLocation for VariableDeclaration {
-    fn location(&self) -> Location {
-        self.location
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ScopeId(usize);
-impl ScopeId {
-    pub fn as_raw(&self) -> usize {
-        self.0
-    }
-    fn increase(&mut self) {
-        self.0 += 1;
-    }
-}
-#[derive(Debug)]
-pub struct Scope {
-    pub(crate) id: ScopeId,
-    pub(crate) parents: Vec<ScopeId>,
-}
-
-impl Scope {
-    pub fn global() -> Self {
-        Scope {
-            id: ScopeId(0),
-            parents: Vec::new(),
-        }
-    }
-
-    fn create_child(&self, next_scope_id: &mut ScopeId) -> Scope {
-        let mut parents = self.parents.clone();
-        parents.push(self.id);
-        next_scope_id.increase();
-        let id = *next_scope_id;
-        Scope { id, parents }
-    }
-}
-
-#[derive(Debug)]
-pub struct Variables {
-    pub(crate) variables: HashMap<ScopeId, Vec<VariableDeclaration>>,
-    pub(crate) all_scopes: Vec<Scope>,
-    pub(crate) active_scope: ScopeId,
-    next_variable_id: VariableId,
-}
-
-impl Variables {
-    pub fn new() -> Self {
-        let mut variables = HashMap::new();
-        let active_scope = ScopeId(0);
-        let global = Scope::global();
-        variables.insert(active_scope, Vec::new());
-        let result = Self {
-            variables,
-            all_scopes: vec![global],
-            active_scope,
-            next_variable_id: VariableId(0),
-        };
-        result
-    }
-
-    pub fn register(
-        &mut self,
-        location: Location,
-        namespaces: &[StringId],
-        name: StringId,
-        type_: TypeId,
-        can_be_overshadowed: bool,
-    ) -> Option<VariableId> {
-        let current_scope = self.active_scope;
-        if self.variables[&current_scope]
-            .iter()
-            .any(|v| !v.can_be_overshadowed && v.name == name)
-        {
-            None
-        } else {
-            let id = self.next_variable_id;
-            self.next_variable_id.increase();
-            self.variables
-                .get_mut(&current_scope)
-                .unwrap()
-                .push(VariableDeclaration {
-                    scope: current_scope,
-                    location,
-                    namespaces: namespaces.to_vec(),
-                    id,
-                    name,
-                    type_,
-                    can_be_overshadowed,
-                });
-            Some(id)
-        }
-    }
-
-    fn find_by_name(&self, name: StringId) -> Option<&VariableDeclaration> {
-        for scope in self.visible_scopes() {
-            if let Some(it) = self.variables[&scope].iter().find(|v| v.name == name) {
-                return Some(it);
-            }
-        }
-        None
-    }
-
-    fn start_scope(&mut self) {
-        let mut scope = ScopeId(self.all_scopes.len() - 1);
-        let child = self.active_scope().create_child(&mut scope);
-        self.active_scope = scope;
-        self.variables.insert(scope, Vec::new());
-        self.all_scopes.push(child);
-    }
-
-    fn end_scope(&mut self) {
-        self.active_scope = self.visible_scopes().skip(1).next().unwrap();
-    }
-
-    fn visible_scopes(&self) -> ScopeIter<'_> {
-        ScopeIter {
-            current: Some(self.active_scope),
-            all_scopes: &self.all_scopes,
-        }
-    }
-
-    fn active_scope(&self) -> &Scope {
-        &self.all_scopes[self.active_scope.0]
-    }
-}
-
-impl Index<VariableId> for Variables {
-    type Output = VariableDeclaration;
-
-    fn index(&self, index: VariableId) -> &Self::Output {
-        for value in self.variables.values() {
-            if let Ok(index) = value.binary_search_by_key(&index, |v| v.id) {
-                return &value[index];
-            }
-        }
-        unreachable!("All variable ids should be used!")
-    }
-}
-
-struct ScopeIter<'a> {
-    current: Option<ScopeId>,
-    all_scopes: &'a [Scope],
-}
-
-impl<'a> Iterator for ScopeIter<'a> {
-    type Item = ScopeId;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let result = self.current.take()?;
-        self.current = self.all_scopes[result.0].parents.last().copied();
-        Some(result)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct VariableId(usize);
-impl VariableId {
-    fn increase(&mut self) {
-        self.0 += 1;
-    }
-}
-
-#[derive(Debug)]
 pub struct Binder {
     file: SourceTextId,
-    variables: Variables,
     constants: HashMap<VariableId, Value>,
     namespaces: Vec<StringId>,
 }
@@ -241,7 +66,6 @@ impl Binder {
     pub fn new(file: SourceTextId) -> Binder {
         Self {
             file,
-            variables: Variables::new(),
             constants: HashMap::new(),
             namespaces: Vec::new(),
         }
@@ -249,9 +73,10 @@ impl Binder {
 
     pub fn bind(mut self, compiler: &mut Compiler) -> BoundId {
         let tree = Parser::new(self.file).parse(compiler);
+        crate::debug::dump_parse_tree(&tree, compiler);
         let node = self.bind_node(tree.node, TypeId::VOID, compiler);
         // dbg!(self.constants);
-        self.variables.dump(&compiler.strings, &compiler.types);
+        crate::debug::dump_bound_tree(node, &compiler);
         node
     }
 
@@ -278,7 +103,7 @@ impl Binder {
                 self.bind_binary(location, binary_node, expected, compiler, id)
             }
             SyntaxNodeKind::Identifier(identifier) => {
-                self.bind_identifier(identifier, expected, compiler, id)
+                self.bind_identifier(identifier, compiler, id)
             }
             SyntaxNodeKind::CommaedExpression((e, _)) => {
                 return self.bind_node_with_id(*e, expected, compiler, id);
@@ -297,24 +122,20 @@ impl Binder {
             SyntaxNodeKind::BlockExpression(block_expression_node) => {
                 self.bind_block_expression(block_expression_node, expected, location, compiler, id)
             }
-            SyntaxNodeKind::FunctionDeclaration(function_declaration_node) => self
-                .bind_function_declaration(
-                    function_declaration_node,
-                    expected,
-                    location,
-                    compiler,
-                    id,
-                ),
-            SyntaxNodeKind::StructDeclaration(struct_declaration_node) => self
-                .bind_struct_declaration(struct_declaration_node, expected, location, compiler, id),
+            SyntaxNodeKind::FunctionDeclaration(function_declaration_node) => {
+                self.bind_function_declaration(function_declaration_node, location, compiler, id)
+            }
+            SyntaxNodeKind::StructDeclaration(struct_declaration_node) => {
+                self.bind_struct_declaration(struct_declaration_node, location, compiler, id)
+            }
             SyntaxNodeKind::ImplBlock(impl_block_node) => {
                 self.bind_impl_block(impl_block_node, expected, location, compiler, id)
             }
             SyntaxNodeKind::FunctionCall(function_call_node) => {
-                self.bind_function_call(function_call_node, expected, location, compiler, id)
+                self.bind_function_call(function_call_node, location, compiler, id)
             }
             SyntaxNodeKind::FieldAccess(field_access_node) => {
-                self.bind_field_access(field_access_node, expected, location, compiler, id)
+                self.bind_field_access(field_access_node, location, compiler, id)
             }
             SyntaxNodeKind::AssignmentStatement(assignment_statement_node) => self
                 .bind_assignment_statement(
@@ -328,13 +149,34 @@ impl Binder {
                 todo!("These are not created yet during parsing")
             }
             SyntaxNodeKind::StructLiteral(struct_literal_node) => {
-                self.bind_struct_literal(struct_literal_node, expected, location, compiler, id)
+                self.bind_struct_literal(struct_literal_node, location, compiler, id)
             }
         };
         unsafe {
-            compiler.nodes.set(id, node);
+            compiler.nodes.set(id, node.clone());
         }
-        self.bind_conversion(id, expected, compiler, ConversionKind::Implicit)
+        let base_id = unsafe { compiler.nodes.prepare_id() };
+        dbg!(base_id);
+        unsafe {
+            compiler.nodes.silent_set(base_id, node);
+        }
+        let mut did_conversion = false;
+        self.bind_conversion_with_id(
+            base_id,
+            expected,
+            compiler,
+            ConversionKind::Implicit,
+            id,
+            &mut did_conversion,
+        );
+        if !did_conversion {
+            assert_ne!(base_id, id);
+            dbg!(base_id);
+            unsafe {
+                compiler.nodes.free_last();
+            }
+        }
+        id
     }
 
     fn bind_node(
@@ -440,7 +282,6 @@ impl Binder {
         conversion_kind: ConversionKind,
     ) -> BoundId {
         let base_type = compiler.nodes.type_of(base_id);
-        let location = compiler.nodes.location_of(base_id);
         if base_type == expected
             || base_type == TypeId::ERROR
             || expected == TypeId::UNKNOWN
@@ -449,6 +290,37 @@ impl Binder {
             return base_id;
         }
         let id = unsafe { compiler.nodes.prepare_id() };
+        let mut did_conversion = false;
+        self.bind_conversion_with_id(
+            base_id,
+            expected,
+            compiler,
+            conversion_kind,
+            id,
+            &mut did_conversion,
+        )
+    }
+
+    fn bind_conversion_with_id(
+        &mut self,
+        base_id: BoundId,
+        expected: TypeId,
+        compiler: &mut Compiler,
+        conversion_kind: ConversionKind,
+        id: BoundId,
+        did_conversion: &mut bool,
+    ) -> BoundId {
+        *did_conversion = true;
+        let base_type = compiler.nodes.type_of(base_id);
+        let location = compiler.nodes.location_of(base_id);
+        if base_type == expected
+            || base_type == TypeId::ERROR
+            || expected == TypeId::UNKNOWN
+            || expected == TypeId::ERROR
+        {
+            *did_conversion = false;
+            return base_id;
+        }
         let node = if conversion_kind.convert(base_type, expected, &mut compiler.types) {
             SyntaxNode::<Bound>::conversion(location, base_id, expected, conversion_kind, id)
         } else {
@@ -464,12 +336,11 @@ impl Binder {
     fn bind_identifier(
         &mut self,
         token: Token,
-        expected: TypeId,
         compiler: &mut Compiler,
         id: BoundId,
     ) -> SyntaxNode<Bound> {
         let name = compiler.intern_location(token.location());
-        if let Some(variable) = self.look_up_variable_by_name(name) {
+        if let Some(variable) = compiler.variables.find_by_name(name) {
             SyntaxNode::<Bound>::variable(
                 token.location(),
                 variable,
@@ -501,9 +372,11 @@ impl Binder {
         let variable = compiler.intern_location(variable_location);
 
         let type_ = compiler.nodes.type_of(expression);
-        let Some(variable) = self.register_variable(variable_location, variable, type_) else {
-            let previous = self
-                .look_up_variable_by_name(variable)
+        let Some(variable) = self.register_variable(compiler, variable_location, variable, type_)
+        else {
+            let previous = compiler
+                .variables
+                .find_by_name(variable)
                 .expect("should exist at this point");
             compiler.diagnostics.report_cannot_redeclare_variable(
                 const_declaration_node.identifier.location(),
@@ -523,12 +396,14 @@ impl Binder {
     }
 
     fn register_variable(
-        &mut self,
+        &self,
+        compiler: &mut Compiler,
         location: Location,
         variable_name: StringId,
         type_: TypeId,
     ) -> Option<VariableId> {
-        self.variables
+        compiler
+            .variables
             .register(location, &self.namespaces, variable_name, type_, true)
     }
 
@@ -587,10 +462,6 @@ impl Binder {
         SyntaxNode::<Bound>::binary(location, lhs, op, rhs, return_type, id)
     }
 
-    fn look_up_variable_by_name(&self, name: StringId) -> Option<&VariableDeclaration> {
-        self.variables.find_by_name(name)
-    }
-
     fn look_up_constant(&self, id: VariableId) -> Option<Value> {
         self.constants.get(&id).cloned()
     }
@@ -603,21 +474,38 @@ impl Binder {
         compiler: &mut Compiler,
         id: BoundId,
     ) -> SyntaxNode<Bound> {
+        let expected_inner = compiler
+            .types
+            .as_inner_array_type(expected)
+            .unwrap_or(TypeId::UNKNOWN);
         let entries: Vec<BoundId> = array_literal_node
             .entries
             .into_iter()
-            .map(|e|
-            // TODO: Use correct expected Type here!
-            {
-                let entry = self.bind_node(e, TypeId::UNKNOWN, compiler);
+            .map(|e| {
+                let entry = self.bind_node(e, expected_inner, compiler);
                 self.remove_integer_literal_type(entry, compiler)
             })
             .collect();
-        let inner_type = entries
-            .iter()
-            .map(|e| compiler.nodes.type_of(*e))
-            .fold(TypeId::UNKNOWN, |acc, cur| cur);
+        let inner_type =
+            entries
+                .iter()
+                .map(|e| compiler.nodes.type_of(*e))
+                .fold(TypeId::UNKNOWN, |acc, cur| {
+                    if acc == TypeId::UNKNOWN {
+                        cur
+                    } else if ConversionKind::Implicit.convert(acc, cur, &mut compiler.types) {
+                        cur
+                    } else if ConversionKind::Implicit.convert(cur, acc, &mut compiler.types) {
+                        acc
+                    } else {
+                        acc
+                    }
+                });
         let length = entries.len();
+        let entries = entries
+            .into_iter()
+            .map(|e| self.bind_conversion(e, inner_type, compiler, ConversionKind::Implicit))
+            .collect();
         let type_ = compiler.types.register(Type::Array(inner_type, length));
         SyntaxNode::<Bound>::array_literal(entries, type_, location, id)
     }
@@ -635,12 +523,20 @@ impl Binder {
             TypeId::UNKNOWN,
             compiler,
         );
+        let inner = compiler.nodes.type_of(expression);
         let has_semicolon = expression_statement_node.semicolon.is_some();
-        let type_ = if has_semicolon {
-            TypeId::VOID
-        } else {
-            compiler.nodes.type_of(expression)
-        };
+        if expected != TypeId::ERROR
+            && inner != TypeId::ERROR
+            && expected != TypeId::UNKNOWN
+            && has_semicolon
+            && ConversionKind::Implicit.convert(inner, expected, &mut compiler.types)
+        {
+            compiler.diagnostics.hint_remove_semicolon(
+                expression_statement_node.semicolon.unwrap().location(),
+                expected,
+            );
+        }
+        let type_ = if has_semicolon { TypeId::VOID } else { inner };
         SyntaxNode::<Bound>::expression_statement(expression, location, has_semicolon, id, type_)
     }
 
@@ -652,10 +548,19 @@ impl Binder {
         compiler: &mut Compiler,
         id: BoundId,
     ) -> SyntaxNode<Bound> {
+        let body_len = block_expression_node.body.len();
+        let expected_type = |i: usize| {
+            if i == body_len - 1 {
+                expected
+            } else {
+                TypeId::UNKNOWN
+            }
+        };
         let statements: Vec<BoundId> = block_expression_node
             .body
             .into_iter()
-            .map(|e| self.bind_node(e, TypeId::UNKNOWN, compiler))
+            .enumerate()
+            .map(|(i, e)| self.bind_node(e, expected_type(i), compiler))
             .collect();
         let type_ = statements
             .last()
@@ -667,7 +572,6 @@ impl Binder {
     fn bind_function_declaration(
         &mut self,
         function_declaration_node: FunctionDeclarationNode<Parsed>,
-        expected: TypeId,
         location: Location,
         compiler: &mut Compiler,
         id: BoundId,
@@ -675,7 +579,7 @@ impl Binder {
         let is_comp = function_declaration_node.comp_keyword.is_some();
         let identifier_location = function_declaration_node.identifier.location();
         let identifier = compiler.intern_location(identifier_location);
-        let generic_parameters: Vec<(Location, StringId, TypeId)> = function_declaration_node
+        let _generic_parameters: Vec<(Location, StringId, TypeId)> = function_declaration_node
             .head
             .generics
             .as_ref()
@@ -721,6 +625,12 @@ impl Binder {
             .into_iter()
             .map(|p| self.bind_parameter(p, compiler))
             .collect();
+        let return_type = function_declaration_node
+            .head
+            .return_type
+            .map(|(_, t)| self.bind_type_identifier(t, compiler))
+            .unwrap_or(TypeId::VOID);
+
         let parameters: Vec<ParameterNode<Bound>> = self.creates_scope(compiler, |b, c| {
             // let generic_parameters = generic_parameters
             //     .into_iter()
@@ -732,18 +642,14 @@ impl Binder {
             let parameters = parameters_bound
                 .iter()
                 .map(|&(l, n, t)| {
-                    let n = b.register_variable(l, n, t).expect("No failure!");
+                    let n = b.register_variable(c, l, n, t).expect("No failure!");
                     ParameterNode::<Bound>::new(l, n, t)
                 })
                 .collect();
-            b.bind_node_with_id(*function_declaration_node.body, TypeId::UNKNOWN, c, body);
+            b.bind_node_with_id(*function_declaration_node.body, return_type, c, body);
             parameters
         });
-        let return_type = function_declaration_node
-            .head
-            .return_type
-            .map(|(_, t)| self.bind_type_identifier(t, compiler))
-            .unwrap_or(TypeId::VOID);
+
         let type_ = Type::FunctionType(FunctionType {
             identifier,
             parameters: parameters.iter().map(|p| p.identifier).collect(),
@@ -752,7 +658,7 @@ impl Binder {
         });
         let type_ = compiler.types.register(type_);
         let identifier = self
-            .register_variable(identifier_location, identifier, type_)
+            .register_variable(compiler, identifier_location, identifier, type_)
             .expect("no duplicate!");
 
         self.register_constant(identifier, Value::CompileTimeFunction(body));
@@ -829,16 +735,15 @@ impl Binder {
         compiler: &mut Compiler,
         c: impl FnOnce(&mut Binder, &mut Compiler) -> U,
     ) -> U {
-        self.variables.start_scope();
+        compiler.variables.start_scope();
         let result = c(self, compiler);
-        self.variables.end_scope();
+        compiler.variables.end_scope();
         result
     }
 
     fn bind_function_call(
         &mut self,
         function_call_node: FunctionCallNode<Parsed>,
-        expected: TypeId,
         location: Location,
         compiler: &mut Compiler,
         id: BoundId,
@@ -893,7 +798,12 @@ impl Binder {
         let type_ = p.type_.map(|(_, t)| self.bind_type_identifier(t, compiler));
         let identifier_type = type_.unwrap_or(TypeId::TYPE);
         let identifier = self
-            .register_variable(p.identifier.location(), identifier, identifier_type)
+            .register_variable(
+                compiler,
+                p.identifier.location(),
+                identifier,
+                identifier_type,
+            )
             .expect("Success");
         if is_out {
             assert!(type_.is_some());
@@ -905,7 +815,6 @@ impl Binder {
     fn bind_struct_declaration(
         &mut self,
         struct_declaration_node: StructDeclarationNode<Parsed>,
-        expected: TypeId,
         location: Location,
         compiler: &mut Compiler,
         id: BoundId,
@@ -917,6 +826,7 @@ impl Binder {
             .map(|f| self.bind_parameter(f, compiler))
             .collect();
         let Some(identifier) = self.register_variable(
+            compiler,
             struct_declaration_node.identifier.location(),
             name,
             TypeId::TYPE,
@@ -945,14 +855,14 @@ impl Binder {
     fn bind_struct_literal(
         &mut self,
         struct_literal_node: StructLiteralNode<Parsed>,
-        expected: TypeId,
         location: Location,
         compiler: &mut Compiler,
         id: BoundId,
     ) -> SyntaxNode<Bound> {
         let identifier = compiler.intern_location(struct_literal_node.identifier.location());
-        let identifier = self
-            .look_up_variable_by_name(identifier)
+        let identifier = compiler
+            .variables
+            .find_by_name(identifier)
             .expect("error handling")
             .id;
         let type_ = self
@@ -991,7 +901,6 @@ impl Binder {
     fn bind_field_access(
         &mut self,
         field_access_node: FieldAccessNode<Parsed>,
-        expected: TypeId,
         location: Location,
         compiler: &mut Compiler,
         id: BoundId,
@@ -1013,6 +922,7 @@ impl Binder {
                             field_identifier,
                         );
                 }
+                dbg!();
                 SyntaxNode::<Bound>::error(location, id)
             }
         }
@@ -1027,7 +937,7 @@ impl Binder {
         id: BoundId,
     ) -> SyntaxNode<Bound> {
         let identifier = compiler.intern_location(impl_block_node.identifier.location());
-        let struct_type = self.look_up_variable_by_name(identifier).unwrap();
+        let struct_type = compiler.variables.find_by_name(identifier).unwrap();
         let type_ = self
             .look_up_constant(struct_type.id)
             .unwrap()
@@ -1048,7 +958,7 @@ impl Binder {
             dbg!(&f.identifier, f.body);
         }
         self.pop_namespace();
-        self.variables.dump(&compiler.strings, &compiler.types);
+        compiler.variables.dump(&compiler.strings, &compiler.types);
         todo!()
     }
 

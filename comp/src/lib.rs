@@ -9,6 +9,7 @@ use crate::{
     syntax_tree::{Bound, Parsed, SyntaxNode, SyntaxTree},
     typing::Types,
     value::Value,
+    variables::{VariableId, Variables},
 };
 
 pub mod debug;
@@ -22,14 +23,17 @@ mod parser;
 mod syntax_tree;
 mod typing;
 mod value;
+mod variables;
 
 pub struct Compiler {
     pub files: SourceText,
     pub diagnostics: Diagnostics,
     pub strings: StringInterner,
+    // Things that are mostly for the binder
     pub nodes: BoundTree,
     pub types: Types,
     pub const_memory: Memoryblock<memory::Bound>,
+    pub variables: Variables,
 }
 
 impl Index<SourceTextId> for Compiler {
@@ -58,6 +62,7 @@ impl Compiler {
             strings,
             nodes: BoundTree::new(),
             const_memory: Memoryblock::new(),
+            variables: Variables::new(),
         }
     }
 
@@ -126,6 +131,14 @@ impl Index<StringId> for StringInterner {
 
     fn index(&self, index: StringId) -> &Self::Output {
         &self.strings[index.0]
+    }
+}
+
+impl Index<VariableId> for StringInterner {
+    type Output = str;
+
+    fn index(&self, index: VariableId) -> &Self::Output {
+        &self[index.1]
     }
 }
 
@@ -353,6 +366,14 @@ impl BoundTree {
         self.elements[id.0] = node;
     }
 
+    unsafe fn silent_set(&mut self, id: BoundId, node: SyntaxNode<Bound>) {
+        while self.elements.len() <= id.0 {
+            self.elements
+                .push(unsafe { SyntaxNode::<Bound>::empty(BoundId(0)) });
+        }
+        self.elements[id.0] = node;
+    }
+
     unsafe fn prepare_id(&mut self) -> BoundId {
         let id = self.elements.len() + self.reserved;
         self.reserved += 1;
@@ -364,6 +385,10 @@ impl BoundTree {
     }
     fn location_of(&self, id: BoundId) -> Location {
         self[id].location()
+    }
+
+    unsafe fn free_last(&mut self) {
+        self.elements.pop();
     }
 }
 

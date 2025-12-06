@@ -1,5 +1,6 @@
 use std::io::stdout;
 
+#[allow(unused_imports)]
 use comp::{Compiler, HasLocation};
 
 fn main() {

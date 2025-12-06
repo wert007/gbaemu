@@ -8,6 +8,7 @@ pub trait Stage: std::fmt::Debug + Clone {}
 impl Stage for Bound {}
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct Metadata {
     start: usize,
     len: usize,
