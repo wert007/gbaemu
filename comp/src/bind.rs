@@ -193,6 +193,19 @@ impl Variables {
     }
 }
 
+impl Index<VariableId> for Variables {
+    type Output = VariableDeclaration;
+
+    fn index(&self, index: VariableId) -> &Self::Output {
+        for value in self.variables.values() {
+            if let Ok(index) = value.binary_search_by_key(&index, |v| v.id) {
+                return &value[index];
+            }
+        }
+        unreachable!("All variable ids should be used!")
+    }
+}
+
 struct ScopeIter<'a> {
     current: Option<ScopeId>,
     all_scopes: &'a [Scope],
@@ -208,7 +221,7 @@ impl<'a> Iterator for ScopeIter<'a> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct VariableId(usize);
 impl VariableId {
     fn increase(&mut self) {
@@ -832,21 +845,27 @@ impl Binder {
     ) -> SyntaxNode<Bound> {
         let base_location = function_call_node.base.location();
         let base = self.bind_node(*function_call_node.base, TypeId::UNKNOWN, compiler);
-        let arguments = function_call_node
-            .arguments
-            .into_iter()
-            .map(|a| self.bind_node(a, TypeId::UNKNOWN, compiler))
-            .collect();
+
+        // .collect();
         let type_ = compiler.nodes.type_of(base);
         if type_ == TypeId::ERROR {
+            dbg!();
             return SyntaxNode::<Bound>::error(location, id);
         }
-        let Some(type_) = compiler.types.return_type_of(type_) else {
+        let Some(function_type) = compiler.types.as_function_type(type_).cloned() else {
+            dbg!();
             compiler
                 .diagnostics
                 .report_invalid_function_type(base_location, type_);
             return SyntaxNode::<Bound>::error(location, id);
         };
+        let type_ = function_type.return_type;
+        let arguments = function_call_node
+            .arguments
+            .into_iter()
+            .zip(&function_type.parameter_types)
+            .map(|(a, t)| self.bind_node(a, *t, compiler))
+            .collect();
         SyntaxNode::<Bound>::function_call(location, base, arguments, type_, id)
     }
 

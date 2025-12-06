@@ -347,10 +347,8 @@ impl BoundTree {
         assert!(id.0 < self.elements.len() + self.reserved);
         self.reserved -= 1;
         while self.elements.len() <= id.0 {
-            self.elements.push(SyntaxNode::<Bound>::error(
-                unsafe { Location::zero() },
-                BoundId(0),
-            ));
+            self.elements
+                .push(unsafe { SyntaxNode::<Bound>::empty(BoundId(0)) });
         }
         self.elements[id.0] = node;
     }

@@ -315,19 +315,89 @@ fn evaluate_binary(
     }
     Some(match binary_node.op {
         crate::bind::BoundBinaryOperator::Addition => {
-            Value::UnsignedInteger32(lhs.as_u32()?.wrapping_add(rhs.as_u32()?))
+            match (
+                compiler.nodes.type_of(binary_node.lhs),
+                compiler.nodes.type_of(binary_node.rhs),
+            ) {
+                (TypeId::UNSIGNED_INTEGER_32, TypeId::UNSIGNED_INTEGER_32) => {
+                    Value::UnsignedInteger32(lhs.as_u32()?.wrapping_add(rhs.as_u32()?))
+                }
+                (TypeId::UNSIGNED_INTEGER_16, TypeId::UNSIGNED_INTEGER_16) => {
+                    Value::UnsignedInteger16(lhs.as_u16()?.wrapping_add(rhs.as_u16()?))
+                }
+                (TypeId::UNSIGNED_INTEGER_8, TypeId::UNSIGNED_INTEGER_8) => {
+                    Value::UnsignedInteger8(lhs.as_u8()?.wrapping_add(rhs.as_u8()?))
+                }
+                _ => todo!("Unexpected operand types!"),
+            }
         }
         crate::bind::BoundBinaryOperator::Subtraction => {
-            Value::UnsignedInteger32(lhs.as_u32()?.wrapping_sub(rhs.as_u32()?))
+            match (
+                compiler.nodes.type_of(binary_node.lhs),
+                compiler.nodes.type_of(binary_node.rhs),
+            ) {
+                (TypeId::UNSIGNED_INTEGER_32, TypeId::UNSIGNED_INTEGER_32) => {
+                    Value::UnsignedInteger32(lhs.as_u32()?.wrapping_sub(rhs.as_u32()?))
+                }
+                (TypeId::UNSIGNED_INTEGER_16, TypeId::UNSIGNED_INTEGER_16) => {
+                    Value::UnsignedInteger16(lhs.as_u16()?.wrapping_sub(rhs.as_u16()?))
+                }
+                (TypeId::UNSIGNED_INTEGER_8, TypeId::UNSIGNED_INTEGER_8) => {
+                    Value::UnsignedInteger8(lhs.as_u8()?.wrapping_sub(rhs.as_u8()?))
+                }
+                _ => todo!("Unexpected operand types!"),
+            }
         }
         crate::bind::BoundBinaryOperator::Multiplication => {
-            Value::UnsignedInteger32(lhs.as_u32()?.wrapping_mul(rhs.as_u32()?))
+            match (
+                compiler.nodes.type_of(binary_node.lhs),
+                compiler.nodes.type_of(binary_node.rhs),
+            ) {
+                (TypeId::UNSIGNED_INTEGER_32, TypeId::UNSIGNED_INTEGER_32) => {
+                    Value::UnsignedInteger32(lhs.as_u32()?.wrapping_mul(rhs.as_u32()?))
+                }
+                (TypeId::UNSIGNED_INTEGER_16, TypeId::UNSIGNED_INTEGER_16) => {
+                    Value::UnsignedInteger16(lhs.as_u16()?.wrapping_mul(rhs.as_u16()?))
+                }
+                (TypeId::UNSIGNED_INTEGER_8, TypeId::UNSIGNED_INTEGER_8) => {
+                    Value::UnsignedInteger8(lhs.as_u8()?.wrapping_mul(rhs.as_u8()?))
+                }
+                _ => todo!("Unexpected operand types!"),
+            }
         }
         crate::bind::BoundBinaryOperator::Division => {
-            Value::UnsignedInteger32(lhs.as_u32()?.wrapping_div(rhs.as_u32()?))
+            match (
+                compiler.nodes.type_of(binary_node.lhs),
+                compiler.nodes.type_of(binary_node.rhs),
+            ) {
+                (TypeId::UNSIGNED_INTEGER_32, TypeId::UNSIGNED_INTEGER_32) => {
+                    Value::UnsignedInteger32(lhs.as_u32()?.wrapping_div(rhs.as_u32()?))
+                }
+                (TypeId::UNSIGNED_INTEGER_16, TypeId::UNSIGNED_INTEGER_16) => {
+                    Value::UnsignedInteger16(lhs.as_u16()?.wrapping_div(rhs.as_u16()?))
+                }
+                (TypeId::UNSIGNED_INTEGER_8, TypeId::UNSIGNED_INTEGER_8) => {
+                    Value::UnsignedInteger8(lhs.as_u8()?.wrapping_div(rhs.as_u8()?))
+                }
+                _ => todo!("Unexpected operand types!"),
+            }
         }
         crate::bind::BoundBinaryOperator::Modulo => {
-            Value::UnsignedInteger32(lhs.as_u32()?.wrapping_rem(rhs.as_u32()?))
+            match (
+                compiler.nodes.type_of(binary_node.lhs),
+                compiler.nodes.type_of(binary_node.rhs),
+            ) {
+                (TypeId::UNSIGNED_INTEGER_32, TypeId::UNSIGNED_INTEGER_32) => {
+                    Value::UnsignedInteger32(lhs.as_u32()?.wrapping_rem(rhs.as_u32()?))
+                }
+                (TypeId::UNSIGNED_INTEGER_16, TypeId::UNSIGNED_INTEGER_16) => {
+                    Value::UnsignedInteger16(lhs.as_u16()?.wrapping_rem(rhs.as_u16()?))
+                }
+                (TypeId::UNSIGNED_INTEGER_8, TypeId::UNSIGNED_INTEGER_8) => {
+                    Value::UnsignedInteger8(lhs.as_u8()?.wrapping_rem(rhs.as_u8()?))
+                }
+                _ => todo!("Unexpected operand types!"),
+            }
         }
     })
 }
