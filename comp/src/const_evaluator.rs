@@ -47,12 +47,10 @@ fn evaluate_expression(
     compiler: &mut Compiler,
     evaluator: &mut ConstEvaluator,
 ) -> Option<Value> {
-    // println!("Executing now:");
-    // crate::debug::dump_bound_tree(expression, compiler);
     if let Some(value) = compiler.nodes.constant_value(expression) {
         return Some(value.clone());
     }
-    match compiler.nodes[expression].kind.clone() {
+    let value = match compiler.nodes[expression].kind.clone() {
         SyntaxNodeKind::Binary(binary_node) => evaluate_binary(&binary_node, compiler, evaluator),
         SyntaxNodeKind::ArrayLiteral(array_literal_node) => {
             evaluate_array_literal(&array_literal_node, compiler, evaluator)
@@ -98,7 +96,10 @@ fn evaluate_expression(
             compiler,
             evaluator,
         ),
-    }
+    };
+
+    compiler.nodes.set_constant_value(expression, value.clone());
+    value
 }
 
 fn evaluate_conversion(

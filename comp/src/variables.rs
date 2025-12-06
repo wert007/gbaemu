@@ -175,9 +175,10 @@ impl<'a> Iterator for ScopeIter<'a> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct VariableId(usize, pub(crate) StringId);
+
 impl VariableId {
-    fn increase(&mut self) {
-        self.0 += 1;
+    pub fn as_raw(&self) -> usize {
+        self.0
     }
 }
 

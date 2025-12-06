@@ -62,7 +62,7 @@ fn dump_bound_tree_recursive(node: BoundId, compiler: &Compiler, indent: usize) 
             println!("Literal {:?}: {}", &stage.constant_value, t(stage.type_));
         }
         SyntaxNodeKind::Identifier(token) => {
-            print!("{}: {}", n(*token), t(stage.type_));
+            println!("{}[id={}]: {}", n(*token), token.as_raw(), t(stage.type_));
         }
         SyntaxNodeKind::Binary(binary_node) => {
             match binary_node.op {

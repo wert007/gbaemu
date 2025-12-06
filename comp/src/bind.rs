@@ -1,6 +1,6 @@
 pub mod conversion;
 
-use std::{collections::HashMap, ops::Index};
+use std::collections::HashMap;
 
 use crate::{
     BoundId, Compiler, HasLocation, Location, SourceTextId, StringId,
@@ -11,7 +11,7 @@ use crate::{
     syntax_tree::*,
     typing::{FunctionType, StructLayout, StructType, Type, TypeId, Types},
     value::Value,
-    variables::{VariableDeclaration, VariableId, Variables},
+    variables::VariableId,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,7 +75,6 @@ impl Binder {
         let tree = Parser::new(self.file).parse(compiler);
         crate::debug::dump_parse_tree(&tree, compiler);
         let node = self.bind_node(tree.node, TypeId::VOID, compiler);
-        // dbg!(self.constants);
         crate::debug::dump_bound_tree(node, &compiler);
         node
     }
@@ -89,10 +88,7 @@ impl Binder {
     ) -> BoundId {
         let location = node.location();
         let node = match node.kind {
-            SyntaxNodeKind::Error => {
-                dbg!();
-                SyntaxNode::<Bound>::error(node.location(), id)
-            }
+            SyntaxNodeKind::Error => SyntaxNode::<Bound>::error(node.location(), id),
             SyntaxNodeKind::Program(program_node) => {
                 self.bind_program(program_node, expected, location, compiler, id)
             }
@@ -156,7 +152,6 @@ impl Binder {
             compiler.nodes.set(id, node.clone());
         }
         let base_id = unsafe { compiler.nodes.prepare_id() };
-        dbg!(base_id);
         unsafe {
             compiler.nodes.silent_set(base_id, node);
         }
@@ -170,8 +165,6 @@ impl Binder {
             &mut did_conversion,
         );
         if !did_conversion {
-            assert_ne!(base_id, id);
-            dbg!(base_id);
             unsafe {
                 compiler.nodes.free_last();
             }
@@ -382,7 +375,6 @@ impl Binder {
                 const_declaration_node.identifier.location(),
                 previous.location(),
             );
-            dbg!("Failed registering variable");
             return SyntaxNode::<Bound>::error(const_declaration_node.identifier.location(), id);
         };
         let value = const_evaluator::evaluate(expression, compiler).unwrap_or_else(|| {
@@ -625,10 +617,12 @@ impl Binder {
             .into_iter()
             .map(|p| self.bind_parameter(p, compiler))
             .collect();
+
         let return_type = function_declaration_node
             .head
             .return_type
-            .map(|(_, t)| self.bind_type_identifier(t, compiler))
+            .as_ref()
+            .map(|(_, t)| self.try_bind_type_identifier(t.clone(), compiler))
             .unwrap_or(TypeId::VOID);
 
         let parameters: Vec<ParameterNode<Bound>> = self.creates_scope(compiler, |b, c| {
@@ -646,9 +640,15 @@ impl Binder {
                     ParameterNode::<Bound>::new(l, n, t)
                 })
                 .collect();
-            b.bind_node_with_id(*function_declaration_node.body, return_type, c, body);
+            let b = b.bind_node_with_id(*function_declaration_node.body, return_type, c, body);
             parameters
         });
+
+        let return_type = function_declaration_node
+            .head
+            .return_type
+            .map(|(_, t)| self.bind_type_identifier(t, compiler))
+            .unwrap_or(TypeId::VOID);
 
         let type_ = Type::FunctionType(FunctionType {
             identifier,
@@ -719,6 +719,41 @@ impl Binder {
         }
     }
 
+    fn try_bind_type_identifier(&mut self, t: TypeIdentifier, compiler: &mut Compiler) -> TypeId {
+        match t {
+            TypeIdentifier::Error(_) => TypeId::ERROR,
+            TypeIdentifier::Named(named) => {
+                let is_reference = named.ampersand.is_some();
+                let name = compiler.intern_location(named.identifier.location());
+                let type_ = match compiler.types.find_by_name(name) {
+                    Some(it) => it,
+                    None => TypeId::UNKNOWN,
+                };
+                let type_ = if is_reference {
+                    compiler.types.register(Type::Reference(type_))
+                } else {
+                    type_
+                };
+                type_
+            }
+            TypeIdentifier::Array(array_type_identifier) => {
+                let length = self.bind_node(
+                    *array_type_identifier.length,
+                    TypeId::UNSIGNED_INTEGER_16,
+                    compiler,
+                );
+                let inner = self.bind_type_identifier(*array_type_identifier.type_, compiler);
+                let Some(length) = const_evaluator::evaluate(length, compiler) else {
+                    return TypeId::UNKNOWN;
+                };
+                let Some(length) = length.as_usize() else {
+                    return TypeId::UNKNOWN;
+                };
+                compiler.types.register(Type::Array(inner, length as _))
+            }
+        }
+    }
+
     fn bind_parameter(
         &mut self,
         p: ParameterNode<Parsed>,
@@ -754,11 +789,9 @@ impl Binder {
         // .collect();
         let type_ = compiler.nodes.type_of(base);
         if type_ == TypeId::ERROR {
-            dbg!();
             return SyntaxNode::<Bound>::error(location, id);
         }
         let Some(function_type) = compiler.types.as_function_type(type_).cloned() else {
-            dbg!();
             compiler
                 .diagnostics
                 .report_invalid_function_type(base_location, type_);
@@ -922,7 +955,6 @@ impl Binder {
                             field_identifier,
                         );
                 }
-                dbg!();
                 SyntaxNode::<Bound>::error(location, id)
             }
         }
@@ -955,7 +987,6 @@ impl Binder {
                 .kind
                 .as_function_declaration()
                 .expect("Only supported for now!");
-            dbg!(&f.identifier, f.body);
         }
         self.pop_namespace();
         compiler.variables.dump(&compiler.strings, &compiler.types);
