@@ -59,10 +59,15 @@ pub struct StructType {
     pub identifier: VariableId,
     pub fields: Vec<(Location, StringId, TypeId)>,
     pub layout: StructLayout,
+    pub associated_functions: Vec<(StringId, TypeId)>,
 }
 impl StructType {
     pub(crate) fn get_field_type_by_name(&self, identifier: StringId) -> Option<TypeId> {
-        self.fields.iter().find(|f| f.1 == identifier).map(|f| f.2)
+        self.associated_functions
+            .iter()
+            .find(|f| f.0 == identifier)
+            .map(|f| f.1)
+            .or(self.fields.iter().find(|f| f.1 == identifier).map(|f| f.2))
     }
 }
 
@@ -229,6 +234,13 @@ impl Types {
         }
     }
 
+    pub(crate) fn as_struct_type_mut(&mut self, id: TypeId) -> Option<&mut StructType> {
+        match &mut self.types[id.0] {
+            Type::Struct(it) => Some(it),
+            _ => None,
+        }
+    }
+
     fn size_of(&self, id: TypeId) -> usize {
         match &self[id] {
             Type::Error => 0,
@@ -255,6 +267,7 @@ impl Types {
         field_identifier: StringId,
     ) -> Option<TypeId> {
         match &self[base_type] {
+            Type::Reference(inner) => self.field_type(*inner, field_identifier),
             Type::Struct(struct_type) => struct_type.get_field_type_by_name(field_identifier),
             _ => None,
         }

@@ -283,6 +283,14 @@ impl Diagnostic {
             ),
         }
     }
+
+    fn this_can_only_be_used_in_impl_block(location: Location) -> Diagnostic {
+        Self {
+            location,
+            message: "this keyword can only be used for function that are inside of an impl block."
+                .into(),
+        }
+    }
 }
 
 pub struct Diagnostics {
@@ -426,5 +434,10 @@ impl Diagnostics {
     pub(crate) fn hint_remove_semicolon(&mut self, location: Location, expected: TypeId) {
         self.diagnostics
             .push(Diagnostic::remove_semicolon(location, expected));
+    }
+
+    pub(crate) fn report_this_can_only_be_used_in_impl_block(&mut self, location: Location) {
+        self.diagnostics
+            .push(Diagnostic::this_can_only_be_used_in_impl_block(location));
     }
 }

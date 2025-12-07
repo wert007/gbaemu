@@ -59,6 +59,7 @@ pub enum TypeIdentifier {
     Error(Location),
     Named(NamedTypeIdentifier),
     Array(ArrayTypeIdentifier),
+    This(ThisTypeIdentifier),
 }
 
 impl HasLocation for TypeIdentifier {
@@ -70,8 +71,15 @@ impl HasLocation for TypeIdentifier {
                 .lbracket
                 .location()
                 .combine(array_type_identifier.rbracket.location()),
+            TypeIdentifier::This(this) => this.location,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct ThisTypeIdentifier {
+    pub ampersand: Option<Token>,
+    pub location: Location,
 }
 
 #[derive(Debug, Clone)]
@@ -1010,7 +1018,7 @@ impl<S: Stage> HasLocation for FieldInitilizationNode<S> {
 pub struct ParameterNode<S: Stage> {
     pub location: Location,
     pub identifier: S::Identifier,
-    colon: S::Token,
+    colon: Option<S::Token>,
     pub type_: S::Type,
     comma: Option<S::Token>,
     _marker: PhantomData<S>,
@@ -1021,7 +1029,7 @@ impl ParameterNode<Bound> {
         Self {
             location,
             identifier,
-            colon: (),
+            colon: None,
             type_,
             comma: None,
             _marker: Default::default(),
@@ -1032,7 +1040,7 @@ impl ParameterNode<Bound> {
 impl ParameterNode<Parsed> {
     pub(crate) fn new(
         identifier: Token,
-        colon: Token,
+        colon: Option<Token>,
         type_identifier: TypeIdentifier,
         comma: Option<Token>,
     ) -> Self {

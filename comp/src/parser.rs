@@ -6,7 +6,7 @@ use crate::{
     syntax_tree::{
         ArrayTypeIdentifier, FieldInitilizationNode, FunctionHeaderNode,
         GenericParameterHeaderNode, GenericParameterNode, NamedTypeIdentifier, ParameterNode,
-        Parsed, SyntaxNode, SyntaxTree, TypeIdentifier,
+        Parsed, SyntaxNode, SyntaxTree, ThisTypeIdentifier, TypeIdentifier,
     },
 };
 
@@ -193,6 +193,7 @@ impl Parser {
 
     fn parse_expression_atom(&mut self, compiler: &mut Compiler) -> SyntaxNode<Parsed> {
         match self.peek(0, compiler) {
+            TokenKind::ThisKeyword => SyntaxNode::<Parsed>::variable(self.consume(compiler)),
             TokenKind::Identifier => self.parse_variable_or_struct_literal(compiler),
             TokenKind::LBracket => self.parse_array_literal(compiler),
             _ => self.parse_literal(compiler),
@@ -284,7 +285,9 @@ impl Parser {
             None
         };
         let lparen = self.expect(TokenKind::LParen, compiler);
-        let parameters = self.parse_until(TokenKind::RParen, compiler, |p, c| p.parse_parameter(c));
+        let parameters = self.parse_until(TokenKind::RParen, compiler, |p, c| {
+            p.parse_parameter_or_this_parameter(c)
+        });
         let rparen = self.expect(TokenKind::RParen, compiler);
         if !parameters.is_empty()
             && let Some(index) = parameters[..parameters.len() - 1]
@@ -305,12 +308,37 @@ impl Parser {
         FunctionHeaderNode::<Parsed>::new(generics, lparen, parameters, rparen, return_type)
     }
 
+    fn parse_parameter_or_this_parameter(
+        &mut self,
+        compiler: &mut Compiler,
+    ) -> ParameterNode<Parsed> {
+        if self.peek(0, compiler) == TokenKind::ThisKeyword
+            || (self.peek(0, compiler) == TokenKind::Ampersand
+                && self.peek(1, compiler) == TokenKind::ThisKeyword)
+        {
+            let ampersand = self.maybe_expect(TokenKind::Ampersand, compiler);
+            let identifier = self.expect(TokenKind::Identifier, compiler);
+            let comma = self.maybe_expect(TokenKind::Comma, compiler);
+            ParameterNode::<Parsed>::new(
+                identifier,
+                None,
+                TypeIdentifier::This(ThisTypeIdentifier {
+                    ampersand,
+                    location: identifier.location(),
+                }),
+                comma,
+            )
+        } else {
+            self.parse_parameter(compiler)
+        }
+    }
+
     fn parse_parameter(&mut self, compiler: &mut Compiler) -> ParameterNode<Parsed> {
         let identifier = self.expect(TokenKind::Identifier, compiler);
         let colon = self.expect(TokenKind::Colon, compiler);
         let type_identifier = self.parse_type_identifier(compiler);
         let comma = self.maybe_expect(TokenKind::Comma, compiler);
-        ParameterNode::<Parsed>::new(identifier, colon, type_identifier, comma)
+        ParameterNode::<Parsed>::new(identifier, Some(colon), type_identifier, comma)
     }
 
     fn parse_type_identifier(&mut self, compiler: &mut Compiler) -> TypeIdentifier {

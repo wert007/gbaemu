@@ -1,6 +1,6 @@
 pub mod conversion;
 
-use std::collections::HashMap;
+use std::{collections::HashMap, io::stdout};
 
 use crate::{
     BoundId, Compiler, HasLocation, Location, SourceTextId, StringId,
@@ -61,6 +61,7 @@ pub struct Binder {
     file: SourceTextId,
     constants: HashMap<VariableId, Value>,
     namespaces: Vec<StringId>,
+    this_type: Option<TypeId>,
 }
 
 impl Binder {
@@ -69,6 +70,7 @@ impl Binder {
             file,
             constants: HashMap::new(),
             namespaces: Vec::new(),
+            this_type: None,
         }
     }
 
@@ -589,7 +591,7 @@ impl Binder {
                             Some((
                                 p.location,
                                 compiler.intern_location(p.identifier.location()),
-                                self.bind_type_identifier(t.clone(), compiler),
+                                self.bind_type_identifier(t.clone(), compiler, false),
                             ))
                         } else {
                             None
@@ -628,7 +630,7 @@ impl Binder {
             .head
             .return_type
             .as_ref()
-            .map(|(_, t)| self.try_bind_type_identifier(t.clone(), compiler))
+            .map(|(_, t)| self.bind_type_identifier(t.clone(), compiler, true))
             .unwrap_or(TypeId::VOID);
 
         let parameters: Vec<ParameterNode<Bound>> = self.creates_scope(compiler, |b, c| {
@@ -653,7 +655,7 @@ impl Binder {
         let return_type = function_declaration_node
             .head
             .return_type
-            .map(|(_, t)| self.bind_type_identifier(t, compiler))
+            .map(|(_, t)| self.bind_type_identifier(t, compiler, false))
             .unwrap_or(TypeId::VOID);
 
         let body = self.bind_conversion(body, return_type, compiler, ConversionKind::Implicit);
@@ -682,7 +684,13 @@ impl Binder {
         )
     }
 
-    fn bind_type_identifier(&mut self, t: TypeIdentifier, compiler: &mut Compiler) -> TypeId {
+    fn bind_type_identifier(
+        &mut self,
+        t: TypeIdentifier,
+        compiler: &mut Compiler,
+        silent: bool,
+    ) -> TypeId {
+        let location = t.location();
         match t {
             TypeIdentifier::Error(_) => TypeId::ERROR,
             TypeIdentifier::Named(named) => {
@@ -691,10 +699,14 @@ impl Binder {
                 let type_ = match compiler.types.find_by_name(name) {
                     Some(it) => it,
                     None => {
-                        compiler
-                            .diagnostics
-                            .report_cannot_find_type(named.location(), name);
-                        TypeId::ERROR
+                        if silent {
+                            TypeId::UNKNOWN
+                        } else {
+                            compiler
+                                .diagnostics
+                                .report_cannot_find_type(named.location(), name);
+                            TypeId::ERROR
+                        }
                     }
                 };
                 let type_ = if is_reference {
@@ -711,52 +723,43 @@ impl Binder {
                     TypeId::UNSIGNED_INTEGER_16,
                     compiler,
                 );
-                let inner = self.bind_type_identifier(*array_type_identifier.type_, compiler);
+                let inner =
+                    self.bind_type_identifier(*array_type_identifier.type_, compiler, silent);
                 let Some(length) = const_evaluator::evaluate(length, compiler) else {
-                    compiler
-                        .diagnostics
-                        .report_non_const_value_in_type(length_location);
-                    return TypeId::ERROR;
+                    return if silent {
+                        TypeId::UNKNOWN
+                    } else {
+                        compiler
+                            .diagnostics
+                            .report_non_const_value_in_type(length_location);
+                        TypeId::ERROR
+                    };
                 };
                 let Some(length) = length.as_usize() else {
-                    return TypeId::ERROR;
+                    return if silent {
+                        TypeId::UNKNOWN
+                    } else {
+                        TypeId::ERROR
+                    };
                 };
                 compiler.types.register(Type::Array(inner, length as _))
             }
-        }
-    }
-
-    fn try_bind_type_identifier(&mut self, t: TypeIdentifier, compiler: &mut Compiler) -> TypeId {
-        match t {
-            TypeIdentifier::Error(_) => TypeId::ERROR,
-            TypeIdentifier::Named(named) => {
-                let is_reference = named.ampersand.is_some();
-                let name = compiler.intern_location(named.identifier.location());
-                let type_ = match compiler.types.find_by_name(name) {
-                    Some(it) => it,
-                    None => TypeId::UNKNOWN,
+            TypeIdentifier::This(this_type) => {
+                let Some(type_) = self.this_type else {
+                    return if silent {
+                        TypeId::UNKNOWN
+                    } else {
+                        compiler
+                            .diagnostics
+                            .report_this_can_only_be_used_in_impl_block(location);
+                        TypeId::ERROR
+                    };
                 };
-                let type_ = if is_reference {
+                if this_type.ampersand.is_some() {
                     compiler.types.register(Type::Reference(type_))
                 } else {
                     type_
-                };
-                type_
-            }
-            TypeIdentifier::Array(array_type_identifier) => {
-                let length = self.bind_node(
-                    *array_type_identifier.length,
-                    TypeId::UNSIGNED_INTEGER_16,
-                    compiler,
-                );
-                let inner = self.bind_type_identifier(*array_type_identifier.type_, compiler);
-                let Some(length) = const_evaluator::evaluate(length, compiler) else {
-                    return compiler.types.register(Type::ArrayUnknownLength(inner));
-                };
-                let Some(length) = length.as_usize() else {
-                    return compiler.types.register(Type::ArrayUnknownLength(inner));
-                };
-                compiler.types.register(Type::Array(inner, length as _))
+                }
             }
         }
     }
@@ -768,7 +771,7 @@ impl Binder {
     ) -> (Location, StringId, TypeId) {
         let location = p.location;
         let name = compiler.intern_location(p.identifier.location());
-        let type_ = self.bind_type_identifier(p.type_, compiler);
+        let type_ = self.bind_type_identifier(p.type_, compiler, false);
         (location, name, type_)
     }
 
@@ -835,7 +838,9 @@ impl Binder {
     ) -> GenericParameterNode<Bound> {
         let is_out = p.out.is_some();
         let identifier = compiler.intern_location(p.identifier.location());
-        let type_ = p.type_.map(|(_, t)| self.bind_type_identifier(t, compiler));
+        let type_ = p
+            .type_
+            .map(|(_, t)| self.bind_type_identifier(t, compiler, false));
         let identifier_type = type_.unwrap_or(TypeId::TYPE);
         let identifier = self
             .register_variable(
@@ -884,6 +889,7 @@ impl Binder {
             identifier,
             fields,
             layout,
+            associated_functions: Vec::new(),
         }));
         self.register_constant(identifier, Value::Type(type_));
 
@@ -982,22 +988,29 @@ impl Binder {
             .unwrap()
             .as_type()
             .unwrap();
-        let struct_type = compiler.types.as_struct_type(type_).unwrap();
+        self.this_type = Some(type_);
         self.push_namespace(identifier);
         let functions: Vec<BoundId> = impl_block_node
             .body
             .into_iter()
             .map(|f| self.bind_node(f, TypeId::VOID, compiler))
             .collect();
-        for f in functions {
-            let f = compiler.nodes[f]
+        let struct_type = compiler.types.as_struct_type_mut(type_).unwrap();
+        for id in functions {
+            let f = compiler.nodes[id]
                 .kind
                 .as_function_declaration()
                 .expect("Only supported for now!");
+            let variable = f.identifier;
+            // TODO: This should probably not live in the struct type!
+            struct_type
+                .associated_functions
+                .push((variable.1, compiler.nodes[id].stage.type_));
+            self.register_constant(variable, Value::CompileTimeFunction(id));
         }
         self.pop_namespace();
-        compiler.variables.dump(&compiler.strings, &compiler.types);
-        todo!()
+        // TODO: This can be better
+        unsafe { SyntaxNode::<Bound>::empty(id) }
     }
 
     fn push_namespace(&mut self, namespace: StringId) {
