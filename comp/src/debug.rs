@@ -32,7 +32,11 @@ impl Variables {
                 }
                 name.push_str(&strings[variable.name]);
 
-                eprintln!("    {name}: {}", types.to_string(variable.type_, strings));
+                eprintln!(
+                    "    {name}[id={}]: {}",
+                    variable.id.as_raw(),
+                    types.to_string(variable.type_, strings)
+                );
             }
         }
     }
@@ -144,6 +148,12 @@ fn dump_bound_tree_recursive(node: BoundId, compiler: &Compiler, indent: usize) 
         }
         SyntaxNodeKind::FieldAccess(field_access_node) => todo!(),
         SyntaxNodeKind::ImplBlock(impl_block_node) => todo!(),
+        SyntaxNodeKind::PartialCapture(partial_capture_node) => {
+            println!("Partial capture for {}", n(partial_capture_node.identifier));
+            for argument in &partial_capture_node.arguments {
+                dump_bound_tree_recursive(*argument, compiler, indent + 1);
+            }
+        }
     }
 }
 
@@ -286,6 +296,9 @@ fn dump_parse_node(node: &SyntaxNode<Parsed>, compiler: &mut Compiler, indent: u
             for node in &impl_block_node.body {
                 dump_parse_node(node, compiler, indent + 1);
             }
+        }
+        SyntaxNodeKind::PartialCapture(partial_capture_node) => {
+            todo!()
         }
     }
 }

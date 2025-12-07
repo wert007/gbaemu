@@ -46,6 +46,13 @@ impl Type {
             _ => false,
         }
     }
+
+    pub(crate) fn is_reference(&self) -> bool {
+        match self {
+            Type::Reference(_) => true,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -63,15 +70,21 @@ pub struct StructType {
     pub identifier: VariableId,
     pub fields: Vec<(Location, StringId, TypeId)>,
     pub layout: StructLayout,
-    pub associated_functions: Vec<(StringId, TypeId)>,
+    pub associated_functions: Vec<(VariableId, TypeId)>,
 }
 impl StructType {
     pub(crate) fn get_field_type_by_name(&self, identifier: StringId) -> Option<TypeId> {
+        self.fields.iter().find(|f| f.1 == identifier).map(|f| f.2)
+    }
+
+    pub(crate) fn get_associated_function_by_name(
+        &self,
+        identifier: StringId,
+    ) -> Option<(VariableId, TypeId)> {
         self.associated_functions
             .iter()
-            .find(|f| f.0 == identifier)
-            .map(|f| f.1)
-            .or(self.fields.iter().find(|f| f.1 == identifier).map(|f| f.2))
+            .find(|f| f.0.1 == identifier)
+            .copied()
     }
 }
 
@@ -234,6 +247,7 @@ impl Types {
     pub(crate) fn as_struct_type(&self, id: TypeId) -> Option<&StructType> {
         match &self[id] {
             Type::Struct(it) => Some(it),
+            Type::Reference(t) => self.as_struct_type(*t),
             _ => None,
         }
     }
@@ -245,7 +259,7 @@ impl Types {
         }
     }
 
-    fn size_of(&self, id: TypeId) -> usize {
+    pub fn size_of(&self, id: TypeId) -> usize {
         match &self[id] {
             Type::Error => 0,
             Type::Unknown => 0,
@@ -257,7 +271,7 @@ impl Types {
             Type::UnsignedInteger32 => 4,
             Type::Bool => 1,
             Type::Array(type_id, len) => self.size_of(*type_id) * len,
-            Type::FunctionType(..) => 0,
+            Type::FunctionType(..) => 4,
             Type::Struct(struct_type) => struct_type.layout.size(),
             Type::IntegerLiteral(_) | Type::ArrayUnknownLength(_) => {
                 unreachable!("This should be unreachable?")
@@ -273,6 +287,20 @@ impl Types {
         match &self[base_type] {
             Type::Reference(inner) => self.field_type(*inner, field_identifier),
             Type::Struct(struct_type) => struct_type.get_field_type_by_name(field_identifier),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn associated_function_type(
+        &self,
+        base_type: TypeId,
+        field_identifier: StringId,
+    ) -> Option<(VariableId, TypeId)> {
+        match &self[base_type] {
+            Type::Reference(inner) => self.associated_function_type(*inner, field_identifier),
+            Type::Struct(struct_type) => {
+                struct_type.get_associated_function_by_name(field_identifier)
+            }
             _ => None,
         }
     }

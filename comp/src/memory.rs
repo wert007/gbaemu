@@ -61,7 +61,11 @@ impl<S: Stage> Memoryblock<S> {
                     self.buffer[ptr + offset] = byte;
                 }
             }
-            crate::value::Value::CompileTimeFunction(_) => {}
+            crate::value::Value::CompileTimeFunction(id) => {
+                for (offset, byte) in (id.0 as u32).to_le_bytes().into_iter().enumerate() {
+                    self.buffer[ptr + offset] = byte;
+                }
+            }
             crate::value::Value::DependentOn(_) => {}
             crate::value::Value::Type(_) => {}
         }

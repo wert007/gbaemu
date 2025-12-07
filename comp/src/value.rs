@@ -62,7 +62,7 @@ impl Value {
             Value::UnsignedInteger32(_) => 4,
             Value::Bool(_) => 1,
             Value::Pointer(_) => 4,
-            Value::CompileTimeFunction(_) => 0,
+            Value::CompileTimeFunction(_) => 4,
             Value::DependentOn(_) => 0,
             Value::Type(_) => 0,
         }

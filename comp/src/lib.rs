@@ -332,6 +332,11 @@ impl Index<Span> for SourceTextFile {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BoundId(usize);
+impl BoundId {
+    pub unsafe fn from_raw(id: usize) -> BoundId {
+        Self(id)
+    }
+}
 
 #[derive(Debug)]
 

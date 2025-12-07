@@ -444,6 +444,27 @@ impl SyntaxNode<Bound> {
             },
         }
     }
+
+    pub(crate) fn partial_capture(
+        location: Location,
+        identifier: VariableId,
+        arguments: Vec<BoundId>,
+        type_: TypeId,
+        id: BoundId,
+    ) -> SyntaxNode<Bound> {
+        Self {
+            location,
+            kind: SyntaxNodeKind::PartialCapture(PartialCaptureNode {
+                identifier,
+                arguments,
+            }),
+            stage: Bound {
+                id,
+                type_,
+                constant_value: None,
+            },
+        }
+    }
 }
 
 fn to_option(value: bool) -> Option<()> {
@@ -756,6 +777,7 @@ pub enum SyntaxNodeKind<S: Stage> {
     StructLiteral(StructLiteralNode<S>),
     FieldAccess(FieldAccessNode<S>),
     ImplBlock(ImplBlockNode<S>),
+    PartialCapture(PartialCaptureNode<S>),
 }
 
 #[derive(Debug, Clone)]
@@ -777,6 +799,12 @@ pub struct FieldAccessNode<S: Stage> {
     pub base: S::ChildNodeBoxed,
     period: S::Token,
     pub field: S::IdentifierUnscoped,
+}
+
+#[derive(Debug, Clone)]
+pub struct PartialCaptureNode<S: Stage> {
+    pub identifier: S::Identifier,
+    pub arguments: Vec<S::ChildNode>,
 }
 
 #[derive(Debug, Clone)]

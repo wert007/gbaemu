@@ -1,6 +1,6 @@
 pub mod conversion;
 
-use std::{collections::HashMap, io::stdout};
+use std::collections::HashMap;
 
 use crate::{
     BoundId, Compiler, HasLocation, Location, SourceTextId, StringId,
@@ -151,6 +151,7 @@ impl Binder {
             SyntaxNodeKind::StructLiteral(struct_literal_node) => {
                 self.bind_struct_literal(struct_literal_node, location, compiler, id)
             }
+            SyntaxNodeKind::PartialCapture(_partial_capture_node) => unreachable!(),
         };
         unsafe {
             compiler.nodes.set(id, node.clone());
@@ -385,12 +386,13 @@ impl Binder {
             );
             return SyntaxNode::<Bound>::error(const_declaration_node.identifier.location(), id);
         };
-        let value = const_evaluator::evaluate(expression, compiler).unwrap_or_else(|| {
-            compiler
-                .diagnostics
-                .report_non_const_value_in_const_declaration(expression_location);
-            Value::Error
-        });
+        let value = const_evaluator::evaluate(expression, compiler, Some(&self.constants))
+            .unwrap_or_else(|| {
+                compiler
+                    .diagnostics
+                    .report_non_const_value_in_const_declaration(expression_location);
+                Value::Error
+            });
         self.register_constant(variable, value.clone());
         SyntaxNode::<Bound>::const_declaration(location, variable, value, id)
     }
@@ -726,7 +728,7 @@ impl Binder {
                 );
                 let inner =
                     self.bind_type_identifier(*array_type_identifier.type_, compiler, silent);
-                let Some(length) = const_evaluator::evaluate(length, compiler) else {
+                let Some(length) = const_evaluator::evaluate(length, compiler, None) else {
                     return if silent {
                         compiler.types.register(Type::ArrayUnknownLength(inner))
                     } else {
@@ -955,22 +957,30 @@ impl Binder {
         let base = self.bind_node(*field_access_node.base, TypeId::UNKNOWN, compiler);
         let field_identifier = compiler.intern_location(field_access_node.field.location());
         let base_type = compiler.nodes.type_of(base);
-        match compiler.types.field_type(base_type, field_identifier) {
-            Some(type_) => {
-                SyntaxNode::<Bound>::field_access(location, base, field_identifier, type_, id)
+        match compiler
+            .types
+            .associated_function_type(base_type, field_identifier)
+        {
+            Some((identifier, type_)) => {
+                SyntaxNode::<Bound>::partial_capture(location, identifier, vec![base], type_, id)
             }
-            None => {
-                if base_type != TypeId::ERROR {
-                    compiler
-                        .diagnostics
-                        .report_cannot_find_field_with_this_name(
-                            location,
-                            base_type,
-                            field_identifier,
-                        );
+            None => match compiler.types.field_type(base_type, field_identifier) {
+                Some(type_) => {
+                    SyntaxNode::<Bound>::field_access(location, base, field_identifier, type_, id)
                 }
-                SyntaxNode::<Bound>::error(location, id)
-            }
+                None => {
+                    if base_type != TypeId::ERROR {
+                        compiler
+                            .diagnostics
+                            .report_cannot_find_field_with_this_name(
+                                location,
+                                base_type,
+                                field_identifier,
+                            );
+                    }
+                    SyntaxNode::<Bound>::error(location, id)
+                }
+            },
         }
     }
 
@@ -1003,11 +1013,10 @@ impl Binder {
                 .as_function_declaration()
                 .expect("Only supported for now!");
             let variable = f.identifier;
+            let type_ = compiler.variables.type_of(variable);
             // TODO: This should probably not live in the struct type!
-            struct_type
-                .associated_functions
-                .push((variable.1, compiler.nodes[id].stage.type_));
-            self.register_constant(variable, Value::CompileTimeFunction(id));
+            struct_type.associated_functions.push((variable, type_));
+            self.register_constant(variable, Value::CompileTimeFunction(f.body));
         }
         self.pop_namespace();
         // TODO: This can be better

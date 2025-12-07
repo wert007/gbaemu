@@ -29,8 +29,17 @@ impl ConstEvaluator {
     }
 }
 
-pub(crate) fn evaluate(expression: BoundId, compiler: &mut Compiler) -> Option<Value> {
+pub(crate) fn evaluate(
+    expression: BoundId,
+    compiler: &mut Compiler,
+    known_constants: Option<&HashMap<VariableId, Value>>,
+) -> Option<Value> {
     let mut evaluator = ConstEvaluator::new();
+    if let Some(constants) = known_constants {
+        for (i, v) in constants {
+            evaluator.assign_variable(*i, v.clone());
+        }
+    }
     let mut value = evaluate_expression(expression, compiler, &mut evaluator);
     if let Some(Value::DependentOn(node)) = value {
         compiler.nodes.set_constant_value(expression, None);
@@ -96,10 +105,37 @@ fn evaluate_expression(
             compiler,
             evaluator,
         ),
+        SyntaxNodeKind::PartialCapture(partial_capture_node) => {
+            evaluate_partial_capture(&partial_capture_node, compiler, evaluator)
+        }
     };
 
     compiler.nodes.set_constant_value(expression, value.clone());
     value
+}
+
+fn evaluate_partial_capture(
+    partial_capture_node: &PartialCaptureNode<Bound>,
+    compiler: &mut Compiler,
+    evaluator: &mut ConstEvaluator,
+) -> Option<Value> {
+    let base = evaluator.read(partial_capture_node.identifier)?;
+    let arguments: Option<Vec<_>> = partial_capture_node
+        .arguments
+        .iter()
+        .map(|a| evaluate_expression(*a, compiler, evaluator))
+        .collect();
+    let arguments = arguments?;
+    let size = arguments.iter().map(|a| a.size()).sum::<usize>() + base.size();
+    let ptr = compiler.const_memory.allocate(size);
+    let mut wptr = ptr + base.size();
+    compiler.const_memory.write_value(ptr, base);
+    for argument in arguments {
+        let size = argument.size();
+        compiler.const_memory.write_value(wptr, argument);
+        wptr += size;
+    }
+    Some(Value::Pointer(ptr))
 }
 
 fn evaluate_conversion(
@@ -261,7 +297,7 @@ fn evaluate_function_call(
         .copied()
         .map(|a| evaluate_expression(a, compiler, evaluator))
         .collect();
-    let arguments = arguments?;
+    let mut arguments = arguments?;
     if base.is_error() || arguments.iter().any(|v| v.is_error()) {
         Some(Value::Error)
     } else {
@@ -269,12 +305,83 @@ fn evaluate_function_call(
             .types
             .as_function_type(type_)
             .expect("Function type");
-        assert_eq!(function_type.parameters.len(), arguments.len());
-        for (p, a) in function_type.parameters.iter().zip(arguments) {
-            evaluator.assign_variable(*p, a);
+        match base {
+            Value::CompileTimeFunction(id) => {
+                assert_eq!(function_type.parameters.len(), arguments.len());
+                for (p, a) in function_type.parameters.iter().zip(arguments) {
+                    evaluator.assign_variable(*p, a);
+                }
+                evaluate_expression(id, compiler, evaluator)
+            }
+            Value::Pointer(ptr) => {
+                let mut base = [0; 4];
+                compiler.const_memory.read(ptr, &mut base);
+                let id = unsafe { BoundId::from_raw(u32::from_le_bytes(base) as usize) };
+                let missing = function_type.parameter_types.len() - arguments.len();
+                let mut wptr = ptr + 4;
+                for t in &function_type.parameter_types[..missing] {
+                    let value = read_value(&compiler.const_memory, &mut wptr, *t, &compiler.types);
+                    arguments.insert(0, value);
+                }
+                assert_eq!(function_type.parameters.len(), arguments.len());
+                for (p, a) in function_type.parameters.iter().zip(arguments) {
+                    evaluator.assign_variable(*p, a);
+                }
+                evaluate_expression(id, compiler, evaluator)
+            }
+            _ => unreachable!(),
         }
-        evaluate_expression(base.as_bound_id().unwrap(), compiler, evaluator)
     }
+}
+
+fn read_value(
+    const_memory: &crate::memory::Memoryblock<crate::memory::Bound>,
+    wptr: &mut usize,
+    t: TypeId,
+    types: &crate::typing::Types,
+) -> Value {
+    let size = types.size_of(t);
+    let value = match size {
+        0 => todo!(),
+        1 => {
+            let mut buffer = [0];
+            const_memory.read(*wptr, &mut buffer);
+            match t {
+                TypeId::BOOL => Value::Bool(buffer[0] == 1),
+                TypeId::UNSIGNED_INTEGER_8 => Value::UnsignedInteger8(buffer[0]),
+                _ => unreachable!(),
+            }
+        }
+        2 => {
+            let mut buffer = [0; 2];
+            const_memory.read(*wptr, &mut buffer);
+            match t {
+                TypeId::UNSIGNED_INTEGER_16 => Value::UnsignedInteger16(u16::from_le_bytes(buffer)),
+                _ => unreachable!(),
+            }
+        }
+        4 => {
+            let mut buffer = [0; 4];
+            const_memory.read(*wptr, &mut buffer);
+            match t {
+                TypeId::POINTER => Value::Pointer(u32::from_le_bytes(buffer) as usize),
+                TypeId::UNSIGNED_INTEGER_32 => Value::UnsignedInteger32(u32::from_le_bytes(buffer)),
+                t if types.as_inner_array_type(t).is_some()
+                    || types.as_struct_type(t).is_some() =>
+                {
+                    Value::Pointer(u32::from_le_bytes(buffer) as usize)
+                }
+                t if types.as_function_type(t).is_some() => Value::CompileTimeFunction(unsafe {
+                    BoundId::from_raw(u32::from_le_bytes(buffer) as _)
+                }),
+                t if types[t].is_reference() => Value::Pointer(u32::from_le_bytes(buffer) as usize),
+                _ => unreachable!(),
+            }
+        }
+        _ => unreachable!(),
+    };
+    *wptr += size;
+    value
 }
 
 fn evaluate_array_literal(

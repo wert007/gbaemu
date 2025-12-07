@@ -317,7 +317,7 @@ impl Parser {
                 && self.peek(1, compiler) == TokenKind::ThisKeyword)
         {
             let ampersand = self.maybe_expect(TokenKind::Ampersand, compiler);
-            let identifier = self.expect(TokenKind::Identifier, compiler);
+            let identifier = self.expect(TokenKind::ThisKeyword, compiler);
             let comma = self.maybe_expect(TokenKind::Comma, compiler);
             ParameterNode::<Parsed>::new(
                 identifier,
