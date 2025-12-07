@@ -30,6 +30,7 @@ pub enum Type {
     IntegerLiteral(usize),
     Bool,
     Array(TypeId, usize),
+    ArrayUnknownLength(TypeId),
     FunctionType(FunctionType),
     Struct(StructType),
     Reference(TypeId),
@@ -194,6 +195,11 @@ impl Types {
                 self.fmt_type(*type_, f, strings)?;
                 write!(f, "; {len}]")
             }
+            Type::ArrayUnknownLength(type_) => {
+                write!(f, "[")?;
+                self.fmt_type(*type_, f, strings)?;
+                write!(f, "; ?]")
+            }
             Type::FunctionType(ft) => {
                 write!(f, "Fn<(")?;
                 for (i, parameter) in ft.parameter_types.iter().enumerate() {
@@ -237,7 +243,9 @@ impl Types {
             Type::Array(type_id, len) => self.size_of(*type_id) * len,
             Type::FunctionType(..) => 0,
             Type::Struct(struct_type) => struct_type.layout.size(),
-            Type::IntegerLiteral(_) => unreachable!("This should be unreachable?"),
+            Type::IntegerLiteral(_) | Type::ArrayUnknownLength(_) => {
+                unreachable!("This should be unreachable?")
+            }
         }
     }
 
@@ -273,6 +281,7 @@ impl Types {
     pub(crate) fn as_inner_array_type(&self, id: TypeId) -> Option<TypeId> {
         match &self[id] {
             Type::Array(t, _) => Some(*t),
+            Type::ArrayUnknownLength(t) => Some(*t),
             _ => None,
         }
     }

@@ -37,6 +37,7 @@ impl BoundBinaryOperator {
         &self,
         lhs_id: TypeId,
         rhs_id: TypeId,
+        expected: TypeId,
         types: &mut Types,
     ) -> (TypeId, TypeId, TypeId) {
         let lhs = &types[lhs_id];
@@ -279,6 +280,10 @@ impl Binder {
             || base_type == TypeId::ERROR
             || expected == TypeId::UNKNOWN
             || expected == TypeId::ERROR
+            || (compiler
+                .types
+                .as_inner_array_type(base_type)
+                .is_some_and(|b| compiler.types.as_inner_array_type(expected) == Some(b)))
         {
             return base_id;
         }
@@ -428,7 +433,6 @@ impl Binder {
         compiler: &mut Compiler,
         id: BoundId,
     ) -> SyntaxNode<Bound> {
-        assert!(expected == TypeId::UNSIGNED_INTEGER_32 || expected == TypeId::UNKNOWN);
         let lhs = self.bind_node(*binary_node.lhs, TypeId::UNKNOWN, compiler);
         let rhs = self.bind_node(*binary_node.rhs, TypeId::UNKNOWN, compiler);
         let op = match binary_node.op.kind {
@@ -442,6 +446,7 @@ impl Binder {
         let (lhs_type, rhs_type, return_type) = op.resolve_types(
             compiler.nodes.type_of(lhs),
             compiler.nodes.type_of(rhs),
+            expected,
             &mut compiler.types,
         );
         let lhs = self.bind_conversion(lhs, lhs_type, compiler, ConversionKind::Implicit);
@@ -510,11 +515,12 @@ impl Binder {
         compiler: &mut Compiler,
         id: BoundId,
     ) -> SyntaxNode<Bound> {
-        let expression = self.bind_node(
-            *expression_statement_node.expression,
-            TypeId::UNKNOWN,
-            compiler,
-        );
+        let expected = if expected == TypeId::VOID {
+            TypeId::UNKNOWN
+        } else {
+            expected
+        };
+        let expression = self.bind_node(*expression_statement_node.expression, expected, compiler);
         let inner = compiler.nodes.type_of(expression);
         let has_semicolon = expression_statement_node.semicolon.is_some();
         if expected != TypeId::ERROR
@@ -640,7 +646,7 @@ impl Binder {
                     ParameterNode::<Bound>::new(l, n, t)
                 })
                 .collect();
-            let b = b.bind_node_with_id(*function_declaration_node.body, return_type, c, body);
+            b.bind_node_with_id(*function_declaration_node.body, return_type, c, body);
             parameters
         });
 
@@ -650,6 +656,7 @@ impl Binder {
             .map(|(_, t)| self.bind_type_identifier(t, compiler))
             .unwrap_or(TypeId::VOID);
 
+        let body = self.bind_conversion(body, return_type, compiler, ConversionKind::Implicit);
         let type_ = Type::FunctionType(FunctionType {
             identifier,
             parameters: parameters.iter().map(|p| p.identifier).collect(),
@@ -744,10 +751,10 @@ impl Binder {
                 );
                 let inner = self.bind_type_identifier(*array_type_identifier.type_, compiler);
                 let Some(length) = const_evaluator::evaluate(length, compiler) else {
-                    return TypeId::UNKNOWN;
+                    return compiler.types.register(Type::ArrayUnknownLength(inner));
                 };
                 let Some(length) = length.as_usize() else {
-                    return TypeId::UNKNOWN;
+                    return compiler.types.register(Type::ArrayUnknownLength(inner));
                 };
                 compiler.types.register(Type::Array(inner, length as _))
             }

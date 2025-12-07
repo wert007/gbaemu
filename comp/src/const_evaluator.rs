@@ -119,6 +119,11 @@ fn evaluate_conversion(
         (ConversionKind::Implicit, Value::UnsignedInteger32(v), TypeId::UNSIGNED_INTEGER_32) => {
             Some(Value::UnsignedInteger32(v as _))
         }
+        (ConversionKind::Implicit, base @ Value::Pointer(_), t)
+            if compiler.types.as_inner_array_type(t).is_some() =>
+        {
+            Some(base)
+        }
         _ => unreachable!("Impossible conversion!"),
     }
 }
@@ -149,7 +154,9 @@ fn evaluate_field_access(
     let buf_u16 = u16::from_le_bytes(buffer.as_chunks::<2>().0[0]);
     let buf_u32 = u32::from_le_bytes(buffer);
     Some(match &compiler.types[type_] {
-        Type::IntegerLiteral(_) => unreachable!("Should be resolved!"),
+        Type::IntegerLiteral(_) | Type::ArrayUnknownLength(_) => {
+            unreachable!("Should be resolved!")
+        }
         Type::Error => Value::Error,
         Type::Unknown => Value::Error,
         Type::Void => Value::Error,
