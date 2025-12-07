@@ -728,7 +728,7 @@ impl Binder {
                     self.bind_type_identifier(*array_type_identifier.type_, compiler, silent);
                 let Some(length) = const_evaluator::evaluate(length, compiler) else {
                     return if silent {
-                        TypeId::UNKNOWN
+                        compiler.types.register(Type::ArrayUnknownLength(inner))
                     } else {
                         compiler
                             .diagnostics
@@ -738,7 +738,7 @@ impl Binder {
                 };
                 let Some(length) = length.as_usize() else {
                     return if silent {
-                        TypeId::UNKNOWN
+                        compiler.types.register(Type::ArrayUnknownLength(inner))
                     } else {
                         TypeId::ERROR
                     };
