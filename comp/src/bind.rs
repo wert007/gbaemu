@@ -79,6 +79,7 @@ impl Binder {
         crate::debug::dump_parse_tree(&tree, compiler);
         let node = self.bind_node(tree.node, TypeId::VOID, compiler);
         crate::debug::dump_bound_tree(node, &compiler);
+        compiler.types.dump(&compiler.strings);
         node
     }
 

@@ -15,6 +15,10 @@ impl TypeId {
     pub const UNSIGNED_INTEGER_16: TypeId = TypeId(6);
     pub const UNSIGNED_INTEGER_32: TypeId = TypeId(7);
     pub const BOOL: TypeId = TypeId(8);
+
+    pub(crate) unsafe fn from_raw(t: usize) -> TypeId {
+        Self(t)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -117,7 +121,7 @@ impl StructLayout {
 
 #[derive(Debug)]
 pub struct Types {
-    types: Vec<Type>,
+    pub(crate) types: Vec<Type>,
     names: HashMap<TypeId, StringId>,
 }
 

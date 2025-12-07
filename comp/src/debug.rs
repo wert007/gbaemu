@@ -6,6 +6,16 @@ use crate::{
     variables::{VariableId, Variables},
 };
 
+impl Types {
+    pub fn dump(&self, strings: &StringInterner) {
+        println!("There are {} types:", self.types.len());
+        for t in 0..self.types.len() {
+            let t = unsafe { TypeId::from_raw(t) };
+            println!("  {}", self.to_string(t, strings));
+        }
+    }
+}
+
 impl Variables {
     pub fn dump(&self, strings: &StringInterner, types: &Types) {
         for scope in &self.all_scopes {
