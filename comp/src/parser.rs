@@ -4,7 +4,7 @@ use crate::{
     Compiler, HasLocation, SourceTextId,
     lexer::{Lexer, Token, TokenKind},
     syntax_tree::{
-        ArrayTypeIdentifier, FieldInitilizationNode, FunctionHeaderNode,
+        ArrayTypeIdentifier, EnumVariantNode, FieldInitilizationNode, FunctionHeaderNode,
         GenericParameterHeaderNode, GenericParameterNode, NamedTypeIdentifier, ParameterNode,
         Parsed, SyntaxNode, SyntaxTree, ThisTypeIdentifier, TypeIdentifier,
     },
@@ -109,6 +109,7 @@ impl Parser {
             },
             TokenKind::FnKeyword => self.parse_function_declaration(compiler),
             TokenKind::StructKeyword => self.parse_struct_declaration(compiler),
+            TokenKind::EnumKeyword => self.parse_enum_declaration(compiler),
             TokenKind::Error => SyntaxNode::<Parsed>::error(self.current(compiler).location()),
             err => {
                 let location = self.current(compiler).location();
@@ -261,6 +262,29 @@ impl Parser {
             rbrace,
         )
     }
+
+    fn parse_enum_declaration(&mut self, compiler: &mut Compiler) -> SyntaxNode<Parsed> {
+        // let comp_keyword = self.maybe_expect(TokenKind::CompKeyword, compiler);
+        let enum_keyword = self.expect(TokenKind::EnumKeyword, compiler);
+        let identifier = self.expect(TokenKind::Identifier, compiler);
+        let lbrace = self.expect(TokenKind::LBrace, compiler);
+        let variants =
+            self.parse_until(TokenKind::RBrace, compiler, |p, c| p.parse_enum_variant(c));
+        if !variants.is_empty()
+            && let Some(index) = variants[..variants.len() - 1]
+                .iter()
+                .position(|e| !e.ends_with_comma())
+        {
+            compiler
+                .diagnostics
+                .report_missing_comma(variants[index].location);
+        }
+
+        let rbrace = self.expect(TokenKind::RBrace, compiler);
+
+        SyntaxNode::<Parsed>::enum_declaration(enum_keyword, identifier, lbrace, variants, rbrace)
+    }
+
     fn maybe_expect(&mut self, comma: TokenKind, compiler: &mut Compiler) -> Option<Token> {
         if self.peek(0, compiler) == comma {
             Some(self.consume(compiler))
@@ -510,5 +534,17 @@ impl Parser {
         });
         let rbrace = self.expect(TokenKind::RBrace, compiler);
         SyntaxNode::<Parsed>::impl_block(impl_keyword, identifier, lbrace, body, rbrace)
+    }
+
+    fn parse_enum_variant(&mut self, compiler: &mut Compiler) -> EnumVariantNode<Parsed> {
+        let identifier = self.expect(TokenKind::Identifier, compiler);
+        let comma = self.maybe_expect(TokenKind::Comma, compiler);
+        let location = identifier.location().combine(comma.map(|c| c.location()));
+        EnumVariantNode {
+            identifier,
+            comma,
+            location,
+        }
+        // SyntaxNode::<Parsed>::enum_variant(name, comma)
     }
 }

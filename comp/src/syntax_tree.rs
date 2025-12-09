@@ -565,6 +565,27 @@ impl SyntaxNode<Parsed> {
         }
     }
 
+    pub(crate) fn enum_declaration(
+        enum_keyword: Token,
+        identifier: Token,
+        lbrace: Token,
+        variants: Vec<EnumVariantNode<Parsed>>,
+        rbrace: Token,
+    ) -> SyntaxNode<Parsed> {
+        let location = enum_keyword.location().combine(rbrace.location());
+        Self {
+            location,
+            stage: Parsed,
+            kind: SyntaxNodeKind::EnumDeclaration(EnumDeclarationNode {
+                enum_keyword,
+                identifier,
+                lbrace,
+                variants,
+                rbrace,
+            }),
+        }
+    }
+
     pub(crate) fn impl_block(
         impl_keyword: Token,
         identifier: Token,
@@ -778,6 +799,7 @@ pub enum SyntaxNodeKind<S: Stage> {
     FieldAccess(FieldAccessNode<S>),
     ImplBlock(ImplBlockNode<S>),
     PartialCapture(PartialCaptureNode<S>),
+    EnumDeclaration(EnumDeclarationNode<S>),
 }
 
 #[derive(Debug, Clone)]
@@ -847,6 +869,15 @@ pub struct StructDeclarationNode<S: Stage> {
     pub identifier: S::Identifier,
     lbrace: S::Token,
     pub fields: Vec<ParameterNode<S>>,
+    rbrace: S::Token,
+}
+
+#[derive(Debug, Clone)]
+pub struct EnumDeclarationNode<S: Stage> {
+    enum_keyword: S::Token,
+    pub identifier: S::Identifier,
+    lbrace: S::Token,
+    pub variants: Vec<EnumVariantNode<S>>,
     rbrace: S::Token,
 }
 
@@ -1039,6 +1070,19 @@ impl FieldInitilizationNode<Parsed> {
 impl<S: Stage> HasLocation for FieldInitilizationNode<S> {
     fn location(&self) -> Location {
         self.location
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct EnumVariantNode<S: Stage> {
+    pub location: Location,
+    pub identifier: S::Identifier,
+    pub comma: Option<S::Token>,
+}
+
+impl<S: Stage> EnumVariantNode<S> {
+    pub fn ends_with_comma(&self) -> bool {
+        self.comma.is_some()
     }
 }
 

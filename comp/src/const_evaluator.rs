@@ -93,6 +93,7 @@ fn evaluate_expression(
             evaluator,
         ),
         SyntaxNodeKind::StructDeclaration(_) => None,
+        SyntaxNodeKind::EnumDeclaration(_) => None,
         SyntaxNodeKind::StructLiteral(struct_literal_node) => evaluate_struct_literal(
             &struct_literal_node,
             compiler.nodes.type_of(expression),
@@ -204,6 +205,7 @@ fn evaluate_field_access(
         Type::UnsignedInteger16 => Value::UnsignedInteger16(buf_u16),
         Type::Array(..) | Type::Struct(_) | Type::Pointer => Value::Pointer(buf_u32 as _),
         Type::UnsignedInteger32 => Value::UnsignedInteger32(buf_u32 as _),
+        Type::Enum(_) => Value::UnsignedInteger32(buf_u32 as _),
     })
 }
 

@@ -42,3 +42,10 @@ const l = Pos { x: 255, y: 127 };
 const m = l.k();
 const p = l.k;
 const q = p();
+
+enum BinaryResult {
+    Success,
+    Error,
+}
+
+const r = BinaryResult::Success;

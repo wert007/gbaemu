@@ -137,6 +137,7 @@ fn dump_bound_tree_recursive(node: BoundId, compiler: &Compiler, indent: usize) 
                 println!("{}: {}", n(field.identifier), t(field.type_))
             }
         }
+        SyntaxNodeKind::EnumDeclaration(_) => todo!(),
         SyntaxNodeKind::StructLiteral(struct_literal_node) => {
             println!("{}", n(struct_literal_node.identifier));
             for field in &struct_literal_node.fields {
@@ -271,6 +272,16 @@ fn dump_parse_node(node: &SyntaxNode<Parsed>, compiler: &mut Compiler, indent: u
                     &compiler[field.identifier.location()],
                     &compiler[field.type_.location()]
                 );
+            }
+        }
+        SyntaxNodeKind::EnumDeclaration(enum_declaration_node) => {
+            println!(
+                "Enum {}",
+                &compiler[enum_declaration_node.identifier.location()]
+            );
+            for variant in &enum_declaration_node.variants {
+                emit_indent(indent + 1);
+                println!("{},", &compiler[variant.identifier.location()]);
             }
         }
         SyntaxNodeKind::StructLiteral(struct_literal_node) => {

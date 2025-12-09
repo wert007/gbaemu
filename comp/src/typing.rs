@@ -1,6 +1,9 @@
 use std::{collections::HashMap, fmt::Display, ops::Index};
 
-use crate::{Location, StringId, StringInterner, variables::VariableId};
+use crate::{
+    Location, StringId, StringInterner,
+    variables::{VariableId, Variables},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TypeId(usize);
@@ -38,6 +41,7 @@ pub enum Type {
     FunctionType(FunctionType),
     Struct(StructType),
     Reference(TypeId),
+    Enum(EnumType),
 }
 impl Type {
     pub(crate) fn is_integer_literal(&self) -> bool {
@@ -66,7 +70,6 @@ pub struct FunctionType {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StructType {
-    pub name: StringId,
     pub identifier: VariableId,
     pub fields: Vec<(Location, StringId, TypeId)>,
     pub layout: StructLayout,
@@ -89,10 +92,18 @@ impl StructType {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct EnumType {
+    pub identifier: VariableId,
+    pub variants: Vec<VariableId>,
+    pub layout: StructLayout,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct StructLayout {
     size: usize,
     offsets: HashMap<StringId, usize>,
 }
+
 impl StructLayout {
     pub(crate) fn size(&self) -> usize {
         self.size
@@ -100,6 +111,17 @@ impl StructLayout {
 
     pub(crate) fn offset_of(&self, field: StringId) -> Option<usize> {
         self.offsets.get(&field).copied()
+    }
+
+    pub fn from_variants(
+        variants: &[VariableId],
+        types: &Types,
+        variables: &Variables,
+    ) -> StructLayout {
+        Self {
+            size: 4,
+            offsets: HashMap::new(),
+        }
     }
 
     pub(crate) fn from_fields(
@@ -235,7 +257,10 @@ impl Types {
                 write!(f, ">")
             }
             Type::Struct(struct_) => {
-                write!(f, "{}", &strings[struct_.name])
+                write!(f, "{}", &strings[struct_.identifier.1])
+            }
+            Type::Enum(enum_) => {
+                write!(f, "{}", &strings[enum_.identifier.1])
             }
             Type::Reference(reference) => {
                 write!(f, "&")?;
@@ -273,6 +298,7 @@ impl Types {
             Type::Array(type_id, len) => self.size_of(*type_id) * len,
             Type::FunctionType(..) => 4,
             Type::Struct(struct_type) => struct_type.layout.size(),
+            Type::Enum(enum_type) => enum_type.layout.size(),
             Type::IntegerLiteral(_) | Type::ArrayUnknownLength(_) => {
                 unreachable!("This should be unreachable?")
             }
@@ -329,6 +355,18 @@ impl Types {
             Type::ArrayUnknownLength(t) => Some(*t),
             _ => None,
         }
+    }
+
+    /// Can only be called once before Self::set. Otherwise ids will be
+    /// duplicated.
+    pub unsafe fn reserve(&mut self) -> TypeId {
+        let id = TypeId(self.types.len());
+        self.types.push(Type::Error);
+        id
+    }
+
+    pub unsafe fn set(&mut self, id: TypeId, type_: Type) {
+        self.types[id.0] = type_;
     }
 }
 

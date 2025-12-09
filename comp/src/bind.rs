@@ -9,7 +9,7 @@ use crate::{
     lexer::{Token, TokenKind},
     parser::Parser,
     syntax_tree::*,
-    typing::{FunctionType, StructLayout, StructType, Type, TypeId, Types},
+    typing::{EnumType, FunctionType, StructLayout, StructType, Type, TypeId, Types},
     value::Value,
     variables::VariableId,
 };
@@ -127,6 +127,9 @@ impl Binder {
             }
             SyntaxNodeKind::StructDeclaration(struct_declaration_node) => {
                 self.bind_struct_declaration(struct_declaration_node, location, compiler, id)
+            }
+            SyntaxNodeKind::EnumDeclaration(enum_declaration_node) => {
+                self.bind_enum_declaration(enum_declaration_node, location, compiler, id)
             }
             SyntaxNodeKind::ImplBlock(impl_block_node) => {
                 self.bind_impl_block(impl_block_node, expected, location, compiler, id)
@@ -892,7 +895,7 @@ impl Binder {
             .into_iter()
             .map(|f| self.bind_parameter(f, compiler))
             .collect();
-        let Some(identifier) = self.register_variable(
+        let Some(identifier) = self.register_global_variable(
             compiler,
             struct_declaration_node.identifier.location(),
             name,
@@ -907,7 +910,6 @@ impl Binder {
         //     .collect();
         let layout = StructLayout::from_fields(&fields, &compiler.types);
         let type_ = compiler.types.register(Type::Struct(StructType {
-            name,
             identifier,
             fields,
             layout,
@@ -916,6 +918,52 @@ impl Binder {
         self.register_constant(identifier, Value::Type(type_));
 
         // TODO: Keep struct declaration similarly to const or function declaration!
+        unsafe { SyntaxNode::empty(id) }
+        // SyntaxNode::<Bound>::struct_declaration(location, identifier, fields_bound, type_, id)
+    }
+
+    fn bind_enum_declaration(
+        &mut self,
+        enum_declaration_node: EnumDeclarationNode<Parsed>,
+        location: Location,
+        compiler: &mut Compiler,
+        id: BoundId,
+    ) -> SyntaxNode<Bound> {
+        let name = compiler.intern_location(enum_declaration_node.identifier.location());
+        let type_ = unsafe { compiler.types.reserve() };
+        self.push_namespace(name);
+        let variants: Vec<VariableId> = enum_declaration_node
+            .variants
+            .into_iter()
+            .map(|f| self.bind_variant(f, type_, compiler))
+            .collect();
+        let Some(identifier) = self.register_global_variable(
+            compiler,
+            enum_declaration_node.identifier.location(),
+            name,
+            TypeId::TYPE,
+        ) else {
+            todo!("Error handling")
+        };
+
+        // let fields_bound = fields
+        //     .iter()
+        //     .map(|f| ParameterNode::<Bound>::new(f.0, f.1, f.2))
+        //     .collect();
+        let layout = StructLayout::from_variants(&variants, &compiler.types, &compiler.variables);
+        unsafe {
+            compiler.types.set(
+                type_,
+                Type::Enum(EnumType {
+                    identifier,
+                    variants,
+                    layout,
+                }),
+            )
+        };
+        self.register_constant(identifier, Value::Type(type_));
+
+        // TODO: Keep enum declaration similarly to const or function declaration!
         unsafe { SyntaxNode::empty(id) }
         // SyntaxNode::<Bound>::struct_declaration(location, identifier, fields_bound, type_, id)
     }
@@ -1068,5 +1116,20 @@ impl Binder {
         } else {
             expression
         }
+    }
+
+    fn bind_variant(
+        &mut self,
+        variant: EnumVariantNode<Parsed>,
+        type_: TypeId,
+        compiler: &mut Compiler,
+    ) -> VariableId {
+        let identifier = compiler.intern_location(variant.identifier.location());
+        let Some(variant) =
+            self.register_global_variable(compiler, variant.location, identifier, type_)
+        else {
+            todo!()
+        };
+        variant
     }
 }
