@@ -29,7 +29,7 @@ struct Pos {
 }
 
 impl Pos {
-    fn x(&this): u8 {
+    fn k(&this): u8 {
         this.y
     }
 }
@@ -39,4 +39,6 @@ struct A {
 }
 
 const l = Pos { x: 255, y: 127 };
-const m = l.x();
+const m = l.k();
+const p = l.k;
+const q = p();

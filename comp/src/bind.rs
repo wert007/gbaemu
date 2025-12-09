@@ -374,7 +374,8 @@ impl Binder {
         let variable = compiler.intern_location(variable_location);
 
         let type_ = compiler.nodes.type_of(expression);
-        let Some(variable) = self.register_variable(compiler, variable_location, variable, type_)
+        let Some(variable) =
+            self.register_global_variable(compiler, variable_location, variable, type_)
         else {
             let previous = compiler
                 .variables
@@ -407,6 +408,18 @@ impl Binder {
         compiler
             .variables
             .register(location, &self.namespaces, variable_name, type_, true)
+    }
+
+    fn register_global_variable(
+        &self,
+        compiler: &mut Compiler,
+        location: Location,
+        variable_name: StringId,
+        type_: TypeId,
+    ) -> Option<VariableId> {
+        compiler
+            .variables
+            .register(location, &self.namespaces, variable_name, type_, false)
     }
 
     fn register_constant(&mut self, variable: VariableId, value: Value) {
@@ -669,9 +682,15 @@ impl Binder {
             return_type,
         });
         let type_ = compiler.types.register(type_);
-        let identifier = self
-            .register_variable(compiler, identifier_location, identifier, type_)
-            .expect("no duplicate!");
+        let Some(identifier) =
+            self.register_global_variable(compiler, identifier_location, identifier, type_)
+        else {
+            compiler
+                .diagnostics
+                // TODO find actual previous declaration!
+                .report_cannot_redeclare_variable(location, location);
+            return SyntaxNode::<Bound>::error(location, id);
+        };
 
         self.register_constant(identifier, Value::CompileTimeFunction(body));
         // let generics = GenericParameterHeaderNode::new(generic_parameters, generi;
@@ -1008,6 +1027,9 @@ impl Binder {
             .collect();
         let struct_type = compiler.types.as_struct_type_mut(type_).unwrap();
         for id in functions {
+            if compiler.nodes.type_of(id) == TypeId::ERROR {
+                continue;
+            }
             let f = compiler.nodes[id]
                 .kind
                 .as_function_declaration()

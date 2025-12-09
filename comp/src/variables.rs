@@ -86,7 +86,7 @@ impl Variables {
         let current_scope = self.active_scope;
         if self.variables[&current_scope]
             .iter()
-            .any(|v| !v.can_be_overshadowed && v.name == name)
+            .any(|v| !v.can_be_overshadowed && v.name == name && v.namespaces == namespaces)
         {
             None
         } else {
