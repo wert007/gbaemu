@@ -114,9 +114,9 @@ impl StructLayout {
     }
 
     pub fn from_variants(
-        variants: &[VariableId],
-        types: &Types,
-        variables: &Variables,
+        _variants: &[VariableId],
+        _types: &Types,
+        _variables: &Variables,
     ) -> StructLayout {
         Self {
             size: 4,

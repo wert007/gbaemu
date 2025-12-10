@@ -34,13 +34,6 @@ impl Value {
         }
     }
 
-    pub(crate) fn as_bound_id(&self) -> Option<BoundId> {
-        match self {
-            Value::CompileTimeFunction(i) | Value::DependentOn(i) => Some(*i),
-            _ => None,
-        }
-    }
-
     pub(crate) fn as_usize(&self) -> Option<usize> {
         match self {
             Value::UnsignedInteger8(i) => Some(*i as usize),
