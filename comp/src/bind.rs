@@ -1010,6 +1010,16 @@ impl Binder {
         for actual in fields.iter() {
             assigned.insert(actual.identifier, true);
         }
+        let too_much: Vec<StringId> = assigned
+            .iter()
+            .filter(|(_, v)| **v)
+            .filter_map(|(n, _)| {
+                struct_type
+                    .get_field_type_by_name(*n)
+                    .is_none()
+                    .then_some(*n)
+            })
+            .collect();
         let missing: Vec<(StringId, TypeId)> = assigned
             .into_iter()
             .filter(|(_, v)| !v)
@@ -1024,6 +1034,16 @@ impl Binder {
                     missing,
                     compiler.variables[struct_type.identifier].location,
                 );
+        }
+        if !too_much.is_empty() {
+            compiler
+                .diagnostics
+                .report_unknown_fields_in_struct_initialisation(
+                    location,
+                    type_,
+                    too_much,
+                    compiler.variables[struct_type.identifier].location,
+                )
         }
         // TODO: Ensure all fields are initialized!
         SyntaxNode::<Bound>::struct_literal(location, identifier, fields, type_, id)

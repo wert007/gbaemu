@@ -288,6 +288,35 @@ impl Diagnostic {
             message: dgnst!("Struct defined here."),
         }
     }
+
+    fn unknown_fields_in_struct_initialisation(
+        location: Location,
+        type_: TypeId,
+        too_much: Vec<StringId>,
+    ) -> Diagnostic {
+        if too_much.len() == 1 {
+            Self {
+                location,
+                message: dgnst!(
+                    "There is no field named ",
+                    too_much[0],
+                    " on type ",
+                    type_,
+                    "."
+                ),
+            }
+        } else {
+            Self {
+                location,
+                message: dgnst!(
+                    "The following fields to not exist in ",
+                    type_,
+                    " and can therefore not be initialised.",
+                    BulletList(location, too_much)
+                ),
+            }
+        }
+    }
 }
 
 pub struct Diagnostics {
@@ -462,6 +491,20 @@ impl Diagnostics {
                     .into_iter()
                     .map(|(n, t)| Parameter(n, t))
                     .collect(),
+            ));
+        self.diagnostics.push(Diagnostic::definition_at(definition));
+    }
+
+    pub(crate) fn report_unknown_fields_in_struct_initialisation(
+        &mut self,
+        location: Location,
+        type_: TypeId,
+        too_much: Vec<StringId>,
+        definition: Location,
+    ) {
+        self.diagnostics
+            .push(Diagnostic::unknown_fields_in_struct_initialisation(
+                location, type_, too_much,
             ));
         self.diagnostics.push(Diagnostic::definition_at(definition));
     }
