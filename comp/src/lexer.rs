@@ -45,8 +45,16 @@ impl Token {
         }
     }
 
-    fn multi_char(_location: Location, _cur: &[char]) -> Token {
-        todo!()
+    fn multi_char(location: Location, chars: &[char]) -> Token {
+        let kind = match chars {
+            [':', ':'] => TokenKind::ColonColon,
+            _ => TokenKind::Error,
+        };
+        Self {
+            location,
+            kind,
+            is_generated: false,
+        }
     }
 
     fn integer(location: Location) -> Token {
@@ -106,6 +114,7 @@ pub enum TokenKind {
     RBracket,
     Comma,
     Colon,
+    ColonColon,
     LParen,
     RParen,
     CompKeyword,
@@ -153,6 +162,7 @@ impl TokenKind {
             TokenKind::RBracket => "]",
             TokenKind::Comma => ",",
             TokenKind::Colon => ":",
+            TokenKind::ColonColon => "::",
             TokenKind::Period => ".",
             TokenKind::LParen => "(",
             TokenKind::RParen => ")",
@@ -251,7 +261,7 @@ impl Lexer {
                     }
                 }
                 (LexState::MultiCharStart(prev), Some(cur)) => {
-                    self.position += 1;
+                    // self.position += 1;
                     if prev == '/' && cur == '/' {
                         lex_state = LexState::Comment;
                         continue;
@@ -259,7 +269,13 @@ impl Lexer {
                     let location = location.with_end_at(self.position);
                     let token = Token::multi_char(location, &[prev, cur]);
                     if token.kind == TokenKind::Error {
-                        compiler.diagnostics.report_invalid_char(location, cur);
+                        self.position -= 1;
+                        let location = location.with_end_at(self.position);
+                        let token = Token::char(location, prev);
+                        if token.kind == TokenKind::Error {
+                            compiler.diagnostics.report_invalid_char(location, prev);
+                        }
+                        break Some(token);
                     }
                     break Some(token);
                 }
@@ -285,6 +301,7 @@ impl Lexer {
 fn followed_by(ch: char) -> &'static [char] {
     match ch {
         '/' => &['/'],
+        ':' => &[':'],
         _ => &[],
     }
 }

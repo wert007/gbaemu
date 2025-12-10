@@ -34,7 +34,7 @@ pub trait Stage: Debug + Clone {
 
 impl Stage for Parsed {
     type IdentifierUnscoped = Token;
-    type Identifier = Token;
+    type Identifier = NamespacedIdentifier;
     type Token = Token;
     type Value = Box<SyntaxNode<Parsed>>;
     type BinaryOp = Token;
@@ -85,7 +85,7 @@ pub struct ThisTypeIdentifier {
 #[derive(Debug, Clone)]
 pub struct NamedTypeIdentifier {
     pub ampersand: Option<Token>,
-    pub identifier: Token,
+    pub identifier: NamespacedIdentifier,
 }
 
 impl HasLocation for NamedTypeIdentifier {
@@ -507,7 +507,7 @@ impl SyntaxNode<Parsed> {
             location,
             kind: SyntaxNodeKind::ConstDeclaration(ConstDeclarationNode {
                 const_keyword,
-                identifier,
+                identifier: NamespacedIdentifier::without_namespace(identifier),
                 equals,
                 expr: Box::new(expression),
                 semicolon,
@@ -531,7 +531,7 @@ impl SyntaxNode<Parsed> {
             kind: SyntaxNodeKind::FunctionDeclaration(FunctionDeclarationNode {
                 comp_keyword,
                 fn_keyword,
-                identifier,
+                identifier: NamespacedIdentifier::without_namespace(identifier),
                 head: function_header,
                 body: Box::new(body),
             }),
@@ -556,7 +556,7 @@ impl SyntaxNode<Parsed> {
             kind: SyntaxNodeKind::StructDeclaration(StructDeclarationNode {
                 comp_keyword,
                 struct_keyword,
-                identifier,
+                identifier: NamespacedIdentifier::without_namespace(identifier),
                 lbrace,
                 fields,
                 rbrace,
@@ -578,7 +578,7 @@ impl SyntaxNode<Parsed> {
             stage: Parsed,
             kind: SyntaxNodeKind::EnumDeclaration(EnumDeclarationNode {
                 enum_keyword,
-                identifier,
+                identifier: NamespacedIdentifier::without_namespace(identifier),
                 lbrace,
                 variants,
                 rbrace,
@@ -588,7 +588,7 @@ impl SyntaxNode<Parsed> {
 
     pub(crate) fn impl_block(
         impl_keyword: Token,
-        identifier: Token,
+        identifier: NamespacedIdentifier,
         lbrace: Token,
         body: Vec<SyntaxNode<Parsed>>,
         rbrace: Token,
@@ -663,7 +663,7 @@ impl SyntaxNode<Parsed> {
     }
 
     pub(crate) fn struct_literal(
-        identifier: Token,
+        identifier: NamespacedIdentifier,
         lbrace: Token,
         fields: Vec<FieldInitilizationNode<Parsed>>,
         rbrace: Token,
@@ -689,7 +689,7 @@ impl SyntaxNode<Parsed> {
         }
     }
 
-    pub(crate) fn variable(variable: Token) -> SyntaxNode<Parsed> {
+    pub(crate) fn variable(variable: NamespacedIdentifier) -> SyntaxNode<Parsed> {
         Self {
             location: variable.location(),
             kind: SyntaxNodeKind::Identifier(variable),
@@ -800,6 +800,40 @@ pub enum SyntaxNodeKind<S: Stage> {
     ImplBlock(ImplBlockNode<S>),
     PartialCapture(PartialCaptureNode<S>),
     EnumDeclaration(EnumDeclarationNode<S>),
+}
+
+#[derive(Debug, Clone)]
+pub struct NamespacedIdentifier {
+    pub location: Location,
+    pub namespaces: Vec<(Token, Token)>,
+    pub identifier: Token,
+}
+
+impl NamespacedIdentifier {
+    pub fn new(namespaces: Vec<(Token, Token)>, identifier: Token) -> Self {
+        let location = identifier
+            .location()
+            .combine(namespaces.first().map(|n| n.0.location()));
+        Self {
+            location,
+            namespaces,
+            identifier,
+        }
+    }
+
+    pub fn without_namespace(identifier: Token) -> NamespacedIdentifier {
+        Self {
+            location: identifier.location(),
+            namespaces: Vec::new(),
+            identifier,
+        }
+    }
+}
+
+impl HasLocation for NamespacedIdentifier {
+    fn location(&self) -> Location {
+        self.location
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1011,7 +1045,7 @@ impl GenericParameterNode<Parsed> {
         Self {
             location,
             out,
-            identifier,
+            identifier: NamespacedIdentifier::without_namespace(identifier),
             type_,
             comma,
         }
@@ -1080,6 +1114,17 @@ pub struct EnumVariantNode<S: Stage> {
     pub comma: Option<S::Token>,
 }
 
+impl EnumVariantNode<Parsed> {
+    pub(crate) fn new(identifier: Token, comma: Option<Token>) -> Self {
+        let location = identifier.location().combine(comma.map(|c| c.location()));
+        Self {
+            location,
+            identifier: NamespacedIdentifier::without_namespace(identifier),
+            comma,
+        }
+    }
+}
+
 impl<S: Stage> EnumVariantNode<S> {
     pub fn ends_with_comma(&self) -> bool {
         self.comma.is_some()
@@ -1122,7 +1167,7 @@ impl ParameterNode<Parsed> {
             .combine(comma.map(|c| c.location()));
         Self {
             location,
-            identifier,
+            identifier: NamespacedIdentifier::without_namespace(identifier),
             colon,
             type_: type_identifier,
             comma,

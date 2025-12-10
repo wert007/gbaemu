@@ -5,8 +5,9 @@ use crate::{
     lexer::{Lexer, Token, TokenKind},
     syntax_tree::{
         ArrayTypeIdentifier, EnumVariantNode, FieldInitilizationNode, FunctionHeaderNode,
-        GenericParameterHeaderNode, GenericParameterNode, NamedTypeIdentifier, ParameterNode,
-        Parsed, SyntaxNode, SyntaxTree, ThisTypeIdentifier, TypeIdentifier,
+        GenericParameterHeaderNode, GenericParameterNode, NamedTypeIdentifier,
+        NamespacedIdentifier, ParameterNode, Parsed, SyntaxNode, SyntaxTree, ThisTypeIdentifier,
+        TypeIdentifier,
     },
 };
 
@@ -55,6 +56,23 @@ impl Parser {
             }
         }
         self.expected.pop();
+        result
+    }
+
+    fn parse_while<U>(
+        &mut self,
+        expected: TokenKind,
+        compiler: &mut Compiler,
+        mut body: impl FnMut(&mut Parser, &mut Compiler) -> U,
+    ) -> Vec<U> {
+        let mut result = Vec::new();
+        while self.peek(0, compiler) == expected {
+            let position = self.lexer.position();
+            result.push(body(self, compiler));
+            if position == self.lexer.position() {
+                self.consume(compiler);
+            }
+        }
         result
     }
 
@@ -178,9 +196,8 @@ impl Parser {
     }
 
     fn parse_variable_or_struct_literal(&mut self, compiler: &mut Compiler) -> SyntaxNode<Parsed> {
-        let variable = self.expect(TokenKind::Identifier, compiler);
+        let identifier = self.parse_namespaced_identifier(compiler);
         if self.peek(0, compiler) == TokenKind::LBrace {
-            let identifier = variable;
             let lbrace = self.expect(TokenKind::LBrace, compiler);
             let fields = self.parse_until(TokenKind::RBrace, compiler, |p, c| {
                 p.parse_field_initialization(c)
@@ -188,13 +205,27 @@ impl Parser {
             let rbrace = self.expect(TokenKind::RBrace, compiler);
             SyntaxNode::<Parsed>::struct_literal(identifier, lbrace, fields, rbrace)
         } else {
-            SyntaxNode::<Parsed>::variable(variable)
+            SyntaxNode::<Parsed>::variable(identifier)
         }
+    }
+
+    fn parse_namespaced_identifier(&mut self, compiler: &mut Compiler) -> NamespacedIdentifier {
+        let mut variable = self.expect(TokenKind::Identifier, compiler);
+        let namespaces = self.parse_while(TokenKind::ColonColon, compiler, |p, c| {
+            let segment = variable;
+            let colon_colon = p.expect(TokenKind::ColonColon, c);
+            variable = p.expect(TokenKind::Identifier, c);
+            (segment, colon_colon)
+        });
+        let identifier = NamespacedIdentifier::new(namespaces, variable);
+        identifier
     }
 
     fn parse_expression_atom(&mut self, compiler: &mut Compiler) -> SyntaxNode<Parsed> {
         match self.peek(0, compiler) {
-            TokenKind::ThisKeyword => SyntaxNode::<Parsed>::variable(self.consume(compiler)),
+            TokenKind::ThisKeyword => SyntaxNode::<Parsed>::variable(
+                NamespacedIdentifier::without_namespace(self.consume(compiler)),
+            ),
             TokenKind::Identifier => self.parse_variable_or_struct_literal(compiler),
             TokenKind::LBracket => self.parse_array_literal(compiler),
             _ => self.parse_literal(compiler),
@@ -370,7 +401,7 @@ impl Parser {
         let ampersand = self.maybe_expect(TokenKind::Ampersand, compiler);
         match self.peek(0, compiler) {
             TokenKind::Identifier => {
-                let identifier = self.expect(TokenKind::Identifier, compiler);
+                let identifier = self.parse_namespaced_identifier(compiler);
                 TypeIdentifier::Named(NamedTypeIdentifier {
                     ampersand,
                     identifier,
@@ -527,7 +558,7 @@ impl Parser {
 
     fn parse_impl_block(&mut self, compiler: &mut Compiler) -> SyntaxNode<Parsed> {
         let impl_keyword = self.expect(TokenKind::ImplKeyword, compiler);
-        let identifier = self.expect(TokenKind::Identifier, compiler);
+        let identifier = self.parse_namespaced_identifier(compiler);
         let lbrace = self.expect(TokenKind::LBrace, compiler);
         let body = self.parse_until(TokenKind::RBrace, compiler, |p, c| {
             p.parse_function_declaration(c)
@@ -539,12 +570,7 @@ impl Parser {
     fn parse_enum_variant(&mut self, compiler: &mut Compiler) -> EnumVariantNode<Parsed> {
         let identifier = self.expect(TokenKind::Identifier, compiler);
         let comma = self.maybe_expect(TokenKind::Comma, compiler);
-        let location = identifier.location().combine(comma.map(|c| c.location()));
-        EnumVariantNode {
-            identifier,
-            comma,
-            location,
-        }
+        EnumVariantNode::new(identifier, comma)
         // SyntaxNode::<Parsed>::enum_variant(name, comma)
     }
 }

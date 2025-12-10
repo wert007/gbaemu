@@ -58,6 +58,7 @@ pub struct Variables {
     pub(crate) all_scopes: Vec<Scope>,
     pub(crate) active_scope: ScopeId,
     next_variable_id: usize,
+    pub current_namespaces: Vec<StringId>,
 }
 
 impl Variables {
@@ -71,23 +72,30 @@ impl Variables {
             all_scopes: vec![global],
             active_scope,
             next_variable_id: 0,
+            current_namespaces: Vec::new(),
         };
         result
+    }
+
+    pub fn push_namespace(&mut self, namespace: StringId) {
+        self.current_namespaces.push(namespace);
+    }
+
+    pub fn pop_namespace(&mut self) {
+        self.current_namespaces.pop();
     }
 
     pub fn register(
         &mut self,
         location: Location,
-        namespaces: &[StringId],
         name: StringId,
         type_: TypeId,
         can_be_overshadowed: bool,
     ) -> Option<VariableId> {
         let current_scope = self.active_scope;
-        if self.variables[&current_scope]
-            .iter()
-            .any(|v| !v.can_be_overshadowed && v.name == name && v.namespaces == namespaces)
-        {
+        if self.variables[&current_scope].iter().any(|v| {
+            !v.can_be_overshadowed && v.name == name && (v.namespaces == self.current_namespaces)
+        }) {
             None
         } else {
             let id = VariableId(self.next_variable_id, name);
@@ -98,7 +106,7 @@ impl Variables {
                 .push(VariableDeclaration {
                     scope: current_scope,
                     location,
-                    namespaces: namespaces.to_vec(),
+                    namespaces: self.current_namespaces.clone(),
                     id,
                     name,
                     type_,
@@ -108,9 +116,19 @@ impl Variables {
         }
     }
 
-    pub fn find_by_name(&self, name: StringId) -> Option<&VariableDeclaration> {
+    pub fn find_by_name(
+        &self,
+        namespaces: &[StringId],
+        name: StringId,
+    ) -> Option<&VariableDeclaration> {
+        // TODO: Do we need to check different scopes, when we have namespaces
+        // specified?
         for scope in self.visible_scopes() {
-            if let Some(it) = self.variables[&scope].iter().find(|v| v.name == name) {
+            if let Some(it) = self.variables[&scope].iter().find(|v| {
+                v.name == name
+                    && (namespaces.is_empty() && v.namespaces == self.current_namespaces
+                        || !namespaces.is_empty() && v.namespaces == namespaces)
+            }) {
                 return Some(it);
             }
         }

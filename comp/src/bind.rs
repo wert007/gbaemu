@@ -60,7 +60,6 @@ impl BoundBinaryOperator {
 pub struct Binder {
     file: SourceTextId,
     constants: HashMap<VariableId, Value>,
-    namespaces: Vec<StringId>,
     this_type: Option<TypeId>,
 }
 
@@ -69,7 +68,6 @@ impl Binder {
         Self {
             file,
             constants: HashMap::new(),
-            namespaces: Vec::new(),
             this_type: None,
         }
     }
@@ -80,6 +78,7 @@ impl Binder {
         let node = self.bind_node(tree.node, TypeId::VOID, compiler);
         crate::debug::dump_bound_tree(node, &compiler);
         compiler.types.dump(&compiler.strings);
+        compiler.variables.dump(&compiler.strings, &compiler.types);
         node
     }
 
@@ -340,23 +339,27 @@ impl Binder {
 
     fn bind_identifier(
         &mut self,
-        token: Token,
+        namespaced_identifier: NamespacedIdentifier,
         compiler: &mut Compiler,
         id: BoundId,
     ) -> SyntaxNode<Bound> {
-        let name = compiler.intern_location(token.location());
-        if let Some(variable) = compiler.variables.find_by_name(name) {
+        let location = namespaced_identifier.location();
+        let (namespaces, identifier) =
+            intern_namespaced_identifier(namespaced_identifier, compiler);
+        if let Some(variable) = compiler.variables.find_by_name(&namespaces, identifier) {
             SyntaxNode::<Bound>::variable(
-                token.location(),
+                location,
                 variable,
                 self.look_up_constant(variable.id),
                 id,
             )
         } else {
-            compiler
-                .diagnostics
-                .report_cannot_find_variable_by_name(token.location());
-            SyntaxNode::<Bound>::error(token.location(), id)
+            compiler.diagnostics.report_cannot_find_variable_by_name(
+                location,
+                &namespaces,
+                identifier,
+            );
+            SyntaxNode::<Bound>::error(location, id)
         }
     }
 
@@ -382,7 +385,7 @@ impl Binder {
         else {
             let previous = compiler
                 .variables
-                .find_by_name(variable)
+                .find_by_name(&[], variable)
                 .expect("should exist at this point");
             compiler.diagnostics.report_cannot_redeclare_variable(
                 const_declaration_node.identifier.location(),
@@ -410,7 +413,7 @@ impl Binder {
     ) -> Option<VariableId> {
         compiler
             .variables
-            .register(location, &self.namespaces, variable_name, type_, true)
+            .register(location, variable_name, type_, true)
     }
 
     fn register_global_variable(
@@ -422,7 +425,7 @@ impl Binder {
     ) -> Option<VariableId> {
         compiler
             .variables
-            .register(location, &self.namespaces, variable_name, type_, false)
+            .register(location, variable_name, type_, false)
     }
 
     fn register_constant(&mut self, variable: VariableId, value: Value) {
@@ -598,6 +601,7 @@ impl Binder {
         let is_comp = function_declaration_node.comp_keyword.is_some();
         let identifier_location = function_declaration_node.identifier.location();
         let identifier = compiler.intern_location(identifier_location);
+        compiler.variables.push_namespace(identifier);
         let _generic_parameters: Vec<(Location, StringId, TypeId)> = function_declaration_node
             .head
             .generics
@@ -685,6 +689,8 @@ impl Binder {
             return_type,
         });
         let type_ = compiler.types.register(type_);
+        compiler.variables.pop_namespace();
+
         let Some(identifier) =
             self.register_global_variable(compiler, identifier_location, identifier, type_)
         else {
@@ -931,12 +937,14 @@ impl Binder {
     ) -> SyntaxNode<Bound> {
         let name = compiler.intern_location(enum_declaration_node.identifier.location());
         let type_ = unsafe { compiler.types.reserve() };
-        self.push_namespace(name);
+        compiler.variables.push_namespace(name);
         let variants: Vec<VariableId> = enum_declaration_node
             .variants
             .into_iter()
-            .map(|f| self.bind_variant(f, type_, compiler))
+            .enumerate()
+            .map(|(i, f)| self.bind_variant(f, i as _, type_, compiler))
             .collect();
+        compiler.variables.pop_namespace();
         let Some(identifier) = self.register_global_variable(
             compiler,
             enum_declaration_node.identifier.location(),
@@ -975,10 +983,11 @@ impl Binder {
         compiler: &mut Compiler,
         id: BoundId,
     ) -> SyntaxNode<Bound> {
-        let identifier = compiler.intern_location(struct_literal_node.identifier.location());
+        let (namespaces, identifier) =
+            intern_namespaced_identifier(struct_literal_node.identifier, compiler);
         let identifier = compiler
             .variables
-            .find_by_name(identifier)
+            .find_by_name(&namespaces, identifier)
             .expect("error handling")
             .id;
         let type_ = self
@@ -1059,15 +1068,21 @@ impl Binder {
         compiler: &mut Compiler,
         id: BoundId,
     ) -> SyntaxNode<Bound> {
-        let identifier = compiler.intern_location(impl_block_node.identifier.location());
-        let struct_type = compiler.variables.find_by_name(identifier).unwrap();
+        // let namespaces =
+        let (namespaces, identifier) =
+            intern_namespaced_identifier(impl_block_node.identifier, compiler);
+        // let identifier = compiler.intern_location(impl_block_node.identifier.location());
+        let struct_type = compiler
+            .variables
+            .find_by_name(&namespaces, identifier)
+            .unwrap();
         let type_ = self
             .look_up_constant(struct_type.id)
             .unwrap()
             .as_type()
             .unwrap();
         self.this_type = Some(type_);
-        self.push_namespace(identifier);
+        compiler.variables.push_namespace(identifier);
         let functions: Vec<BoundId> = impl_block_node
             .body
             .into_iter()
@@ -1088,17 +1103,9 @@ impl Binder {
             struct_type.associated_functions.push((variable, type_));
             self.register_constant(variable, Value::CompileTimeFunction(f.body));
         }
-        self.pop_namespace();
+        compiler.variables.pop_namespace();
         // TODO: This can be better
         unsafe { SyntaxNode::<Bound>::empty(id) }
-    }
-
-    fn push_namespace(&mut self, namespace: StringId) {
-        self.namespaces.push(namespace);
-    }
-
-    fn pop_namespace(&mut self) {
-        self.namespaces.pop();
     }
 
     fn remove_integer_literal_type(
@@ -1121,6 +1128,7 @@ impl Binder {
     fn bind_variant(
         &mut self,
         variant: EnumVariantNode<Parsed>,
+        i: u32,
         type_: TypeId,
         compiler: &mut Compiler,
     ) -> VariableId {
@@ -1130,6 +1138,20 @@ impl Binder {
         else {
             todo!()
         };
+        self.register_constant(variant, Value::UnsignedInteger32(i));
         variant
     }
+}
+
+fn intern_namespaced_identifier(
+    namespaced_identifier: NamespacedIdentifier,
+    compiler: &mut Compiler,
+) -> (Vec<StringId>, StringId) {
+    let namespaces: Vec<_> = namespaced_identifier
+        .namespaces
+        .into_iter()
+        .map(|n| compiler.intern_location(n.0.location()))
+        .collect();
+    let identifier = compiler.intern_location(namespaced_identifier.identifier.location());
+    (namespaces, identifier)
 }

@@ -22,6 +22,26 @@ pub trait DiagnosticMessageComponent {
     ) -> std::fmt::Result;
 }
 
+pub struct Namespace(Vec<StringId>);
+
+impl DiagnosticMessageComponent for Namespace {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+        types: &Types,
+        strings: &StringInterner,
+    ) -> std::fmt::Result {
+        if self.0.is_empty() {
+            return Ok(());
+        }
+        for namespace in &self.0 {
+            namespace.fmt(f, types, strings)?;
+            write!(f, "::")?;
+        }
+        Ok(())
+    }
+}
+
 impl DiagnosticMessageComponent for StringId {
     fn fmt(
         &self,
@@ -193,10 +213,30 @@ impl Diagnostic {
         }
     }
 
-    fn cannot_find_variable_by_name(location: Location) -> Diagnostic {
-        Self {
-            location,
-            message: "No variable by this name could be found.".into(),
+    fn cannot_find_variable_by_name(
+        location: Location,
+        namespaces: &[StringId],
+        name: StringId,
+    ) -> Diagnostic {
+        if namespaces.is_empty() {
+            Self {
+                location,
+                message: dgnst!(
+                    "No variable named ",
+                    name,
+                    " could be found in the current scope."
+                ),
+            }
+        } else {
+            Self {
+                location,
+                message: dgnst!(
+                    "No variable named ",
+                    name,
+                    " in this scope ",
+                    Namespace(namespaces.into())
+                ),
+            }
         }
     }
 
@@ -358,9 +398,16 @@ impl Diagnostics {
             .push(Diagnostic::non_const_value_in_const_declaration(location));
     }
 
-    pub fn report_cannot_find_variable_by_name(&mut self, location: Location) {
+    pub fn report_cannot_find_variable_by_name(
+        &mut self,
+        location: Location,
+        namespaces: &[StringId],
+        identifier: StringId,
+    ) {
         self.diagnostics
-            .push(Diagnostic::cannot_find_variable_by_name(location));
+            .push(Diagnostic::cannot_find_variable_by_name(
+                location, namespaces, identifier,
+            ));
     }
 
     pub fn report_cannot_redeclare_variable(&mut self, location: Location, previous: Location) {

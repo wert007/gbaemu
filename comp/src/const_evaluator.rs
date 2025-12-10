@@ -257,6 +257,7 @@ fn evaluate_assign_to_lhs(
         SyntaxNodeKind::Identifier(identifier) => {
             evaluator.assign_variable(*identifier, value);
         }
+        SyntaxNodeKind::Error => {}
         unexpected => unreachable!("unexpected lhs for assignmen: {unexpected:#?}"),
     }
 }
