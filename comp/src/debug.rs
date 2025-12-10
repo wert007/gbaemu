@@ -65,17 +65,26 @@ fn dump_bound_tree_recursive(node: BoundId, compiler: &Compiler, indent: usize) 
             let ti = compiler
                 .variables
                 .type_of(const_declaration_node.identifier);
+            let value = compiler.nodes[const_declaration_node.expr]
+                .stage
+                .constant_value
+                .as_ref()
+                .unwrap();
             println!(
-                "const {}: {}= {:?};",
+                "const {}: {} = {:?}",
                 n(const_declaration_node.identifier),
                 t(ti),
-                const_declaration_node.expr
+                value
             );
+            dump_bound_tree_recursive(const_declaration_node.expr, compiler, indent + 1);
         }
         SyntaxNodeKind::Literal(_) => {
             println!("Literal {:?}: {}", &stage.constant_value, t(stage.type_));
         }
         SyntaxNodeKind::Identifier(token) => {
+            for namespace in &compiler.variables[*token].namespaces {
+                print!("{}::", &compiler.strings[*namespace]);
+            }
             println!("{}[id={}]: {}", n(*token), token.as_raw(), t(stage.type_));
         }
         SyntaxNodeKind::Binary(binary_node) => {
@@ -114,8 +123,10 @@ fn dump_bound_tree_recursive(node: BoundId, compiler: &Compiler, indent: usize) 
         }
         SyntaxNodeKind::FunctionCall(function_call_node) => {
             println!("FunctionCall");
+            emit_indent(indent);
             println!("Base");
             dump_bound_tree_recursive(function_call_node.base, compiler, indent + 1);
+            emit_indent(indent);
             println!("Args");
             for arg in &function_call_node.arguments {
                 dump_bound_tree_recursive(*arg, compiler, indent + 1);
@@ -142,9 +153,8 @@ fn dump_bound_tree_recursive(node: BoundId, compiler: &Compiler, indent: usize) 
             println!("{}", n(struct_literal_node.identifier));
             for field in &struct_literal_node.fields {
                 emit_indent(indent + 1);
-                print!("{}:", &compiler.strings[field.identifier]);
+                print!("{}: ", &compiler.strings[field.identifier]);
                 dump_bound_tree_recursive(field.expression, compiler, 0);
-                println!();
             }
         }
         SyntaxNodeKind::FieldAccess(field_access_node) => todo!(),

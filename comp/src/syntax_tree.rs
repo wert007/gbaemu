@@ -25,7 +25,6 @@ pub trait Stage: Debug + Clone {
     type IdentifierUnscoped: Debug + Clone;
     type Identifier: Debug + Clone;
     type Token: Debug + Clone;
-    type Value: Debug + Clone;
     type BinaryOp: Debug + Clone;
     type Type: Debug + Clone;
     type ChildNodeBoxed: Debug + Clone;
@@ -36,7 +35,6 @@ impl Stage for Parsed {
     type IdentifierUnscoped = Token;
     type Identifier = NamespacedIdentifier;
     type Token = Token;
-    type Value = Box<SyntaxNode<Parsed>>;
     type BinaryOp = Token;
     type Type = TypeIdentifier;
     type ChildNodeBoxed = Box<Self::ChildNode>;
@@ -47,7 +45,6 @@ impl Stage for Bound {
     type IdentifierUnscoped = StringId;
     type Identifier = VariableId;
     type Token = ();
-    type Value = Value;
     type BinaryOp = BoundBinaryOperator;
     type Type = TypeId;
     type ChildNode = BoundId;
@@ -122,7 +119,7 @@ impl SyntaxNode<Bound> {
     pub fn const_declaration(
         location: Location,
         variable: VariableId,
-        value: Value,
+        value: BoundId,
         id: BoundId,
     ) -> Self {
         Self {
@@ -1222,6 +1219,6 @@ pub struct ConstDeclarationNode<S: Stage> {
     const_keyword: S::Token,
     pub identifier: S::Identifier,
     equals: S::Token,
-    pub expr: S::Value,
+    pub expr: S::ChildNodeBoxed,
     semicolon: S::Token,
 }

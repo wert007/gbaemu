@@ -401,7 +401,7 @@ impl Binder {
                 Value::Error
             });
         self.register_constant(variable, value.clone());
-        SyntaxNode::<Bound>::const_declaration(location, variable, value, id)
+        SyntaxNode::<Bound>::const_declaration(location, variable, expression, id)
     }
 
     fn register_variable(
