@@ -1005,6 +1005,26 @@ impl Binder {
             .into_iter()
             .map(|f| self.bind_field_initializer(f, &struct_type, compiler))
             .collect();
+        let mut assigned: HashMap<StringId, bool> =
+            struct_type.fields.iter().map(|f| (f.1, false)).collect();
+        for actual in fields.iter() {
+            assigned.insert(actual.identifier, true);
+        }
+        let missing: Vec<StringId> = assigned
+            .into_iter()
+            .filter(|(k, v)| !v)
+            .map(|(n, _)| n)
+            .collect();
+        if !missing.is_empty() {
+            compiler
+                .diagnostics
+                .report_missing_fields_in_struct_initialisation(
+                    location,
+                    type_,
+                    missing,
+                    compiler.variables[struct_type.identifier].location,
+                );
+        }
         // TODO: Ensure all fields are initialized!
         SyntaxNode::<Bound>::struct_literal(location, identifier, fields, type_, id)
     }

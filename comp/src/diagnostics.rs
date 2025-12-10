@@ -22,6 +22,28 @@ pub trait DiagnosticMessageComponent {
     ) -> std::fmt::Result;
 }
 
+pub struct BulletList<T>(Location, Vec<T>);
+
+impl<T: DiagnosticMessageComponent> DiagnosticMessageComponent for BulletList<T> {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+        types: &Types,
+        strings: &StringInterner,
+    ) -> std::fmt::Result {
+        let length = 10;
+        for entry in &self.1 {
+            for _ in 0..length {
+                write!(f, " ")?;
+            }
+            write!(f, " - ")?;
+            entry.fmt(f, types, strings)?;
+            writeln!(f)?;
+        }
+        Ok(())
+    }
+}
+
 pub struct Namespace(Vec<StringId>);
 
 impl DiagnosticMessageComponent for Namespace {
@@ -331,6 +353,29 @@ impl Diagnostic {
                 .into(),
         }
     }
+
+    fn missing_fields_in_struct_initialisation(
+        location: Location,
+        type_: TypeId,
+        missing_fields: Vec<StringId>,
+    ) -> Diagnostic {
+        Self {
+            location,
+            message: dgnst!(
+                "Not all fields of ",
+                type_,
+                " has been initialised. The following fields are missing:\n",
+                BulletList(location, missing_fields)
+            ),
+        }
+    }
+
+    fn definition_at(location: Location) -> Diagnostic {
+        Self {
+            location,
+            message: dgnst!("Struct defined here."),
+        }
+    }
 }
 
 pub struct Diagnostics {
@@ -486,5 +531,21 @@ impl Diagnostics {
     pub(crate) fn report_this_can_only_be_used_in_impl_block(&mut self, location: Location) {
         self.diagnostics
             .push(Diagnostic::this_can_only_be_used_in_impl_block(location));
+    }
+
+    pub(crate) fn report_missing_fields_in_struct_initialisation(
+        &mut self,
+        location: Location,
+        type_: TypeId,
+        missing_fields: Vec<StringId>,
+        definition: Location,
+    ) {
+        self.diagnostics
+            .push(Diagnostic::missing_fields_in_struct_initialisation(
+                location,
+                type_,
+                missing_fields,
+            ));
+        self.diagnostics.push(Diagnostic::definition_at(definition));
     }
 }
