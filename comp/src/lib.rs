@@ -97,7 +97,7 @@ impl Compiler {
 
     pub fn write_diagnostics(&self, out: &mut impl std::io::Write) -> std::io::Result<()> {
         self.diagnostics
-            .write_to(out, &self.files, &self.types, &self.strings)
+            .write_to(out, &self.files, &self.types, &self.strings, &self.files)
     }
 }
 

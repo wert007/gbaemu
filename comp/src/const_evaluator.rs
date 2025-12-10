@@ -227,7 +227,10 @@ fn evaluate_struct_literal(
     let fields = fields?;
     let base = compiler.const_memory.allocate(type_.layout.size());
     for (field, value) in fields {
-        let offset = type_.layout.offset_of(field).unwrap();
+        let Some(offset) = type_.layout.offset_of(field) else {
+            // TODO: Should we clean up after ourselves?
+            return Some(Value::Error);
+        };
         compiler.const_memory.write_value(base + offset, value);
     }
     Some(Value::Pointer(base))

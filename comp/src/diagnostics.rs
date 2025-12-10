@@ -13,13 +13,61 @@ macro_rules! dgnst {
     };
 }
 
+pub struct DiagnosticMessageComponentToString<'a, 'b, 'c, 'd, T> {
+    types: &'a Types,
+    strings: &'b StringInterner,
+    source_texts: &'c SourceText,
+    value: &'d T,
+}
+
+impl<T: DiagnosticMessageComponent> Display
+    for DiagnosticMessageComponentToString<'_, '_, '_, '_, T>
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.value
+            .fmt(f, self.types, self.strings, self.source_texts)
+    }
+}
+
 pub trait DiagnosticMessageComponent {
     fn fmt(
         &self,
         f: &mut std::fmt::Formatter<'_>,
         types: &Types,
         strings: &StringInterner,
+        source_texts: &SourceText,
     ) -> std::fmt::Result;
+}
+
+pub trait DiagnosticMessageComponentToStringTrait {
+    fn to_string(
+        &self,
+        types: &Types,
+        strings: &StringInterner,
+        source_texts: &SourceText,
+    ) -> String;
+}
+
+impl<T> DiagnosticMessageComponentToStringTrait for T
+where
+    T: DiagnosticMessageComponent + Sized,
+{
+    fn to_string(
+        &self,
+        types: &Types,
+        strings: &StringInterner,
+        source_texts: &SourceText,
+    ) -> String {
+        format!(
+            "{}",
+            DiagnosticMessageComponentToString {
+                types,
+                source_texts,
+                strings,
+                value: self
+            }
+        )
+    }
 }
 
 pub struct BulletList<T>(Location, Vec<T>);
@@ -30,16 +78,34 @@ impl<T: DiagnosticMessageComponent> DiagnosticMessageComponent for BulletList<T>
         f: &mut std::fmt::Formatter<'_>,
         types: &Types,
         strings: &StringInterner,
+        source_texts: &SourceText,
     ) -> std::fmt::Result {
-        let length = 10;
+        let length = self.0.to_string(types, strings, source_texts).len() + 1;
         for entry in &self.1 {
+            writeln!(f)?;
             for _ in 0..length {
                 write!(f, " ")?;
             }
             write!(f, " - ")?;
-            entry.fmt(f, types, strings)?;
-            writeln!(f)?;
+            entry.fmt(f, types, strings, source_texts)?;
         }
+        Ok(())
+    }
+}
+
+pub struct Parameter(StringId, TypeId);
+
+impl DiagnosticMessageComponent for Parameter {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+        types: &Types,
+        strings: &StringInterner,
+        source_texts: &SourceText,
+    ) -> std::fmt::Result {
+        self.0.fmt(f, types, strings, source_texts)?;
+        write!(f, ": ")?;
+        self.1.fmt(f, types, strings, source_texts)?;
         Ok(())
     }
 }
@@ -52,12 +118,13 @@ impl DiagnosticMessageComponent for Namespace {
         f: &mut std::fmt::Formatter<'_>,
         types: &Types,
         strings: &StringInterner,
+        source_texts: &SourceText,
     ) -> std::fmt::Result {
         if self.0.is_empty() {
             return Ok(());
         }
         for namespace in &self.0 {
-            namespace.fmt(f, types, strings)?;
+            namespace.fmt(f, types, strings, source_texts)?;
             write!(f, "::")?;
         }
         Ok(())
@@ -70,6 +137,7 @@ impl DiagnosticMessageComponent for StringId {
         f: &mut std::fmt::Formatter<'_>,
         _types: &Types,
         strings: &StringInterner,
+        _source_texts: &SourceText,
     ) -> std::fmt::Result {
         std::fmt::Display::fmt(&strings[*self], f)
     }
@@ -80,6 +148,7 @@ impl DiagnosticMessageComponent for &str {
         f: &mut std::fmt::Formatter<'_>,
         _types: &Types,
         _strings: &StringInterner,
+        _source_texts: &SourceText,
     ) -> std::fmt::Result {
         std::fmt::Display::fmt(&self, f)
     }
@@ -91,6 +160,7 @@ impl DiagnosticMessageComponent for String {
         f: &mut std::fmt::Formatter<'_>,
         _types: &Types,
         _strings: &StringInterner,
+        _source_texts: &SourceText,
     ) -> std::fmt::Result {
         std::fmt::Display::fmt(&self, f)
     }
@@ -102,8 +172,27 @@ impl DiagnosticMessageComponent for TypeId {
         f: &mut std::fmt::Formatter<'_>,
         types: &Types,
         strings: &StringInterner,
+        _source_texts: &SourceText,
     ) -> std::fmt::Result {
         types.fmt_type(*self, f, strings)
+    }
+}
+
+impl DiagnosticMessageComponent for Location {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+        _types: &Types,
+        _strings: &StringInterner,
+        source_texts: &SourceText,
+    ) -> std::fmt::Result {
+        write!(
+            f,
+            "[{}:{}:{}]",
+            source_texts.file_name(*self),
+            source_texts.line_number(*self),
+            source_texts.column(*self)
+        )
     }
 }
 
@@ -112,19 +201,20 @@ pub enum DiagnosticMessage {
     Format(Vec<Box<dyn DiagnosticMessageComponent>>),
 }
 
-pub struct DiagnosticMessageDisplay<'a, 'b, 'c> {
+pub struct DiagnosticMessageDisplay<'a, 'b, 'c, 'd> {
     types: &'a Types,
     strings: &'b StringInterner,
-    message: &'c DiagnosticMessage,
+    source_texts: &'c SourceText,
+    message: &'d DiagnosticMessage,
 }
 
-impl Display for DiagnosticMessageDisplay<'_, '_, '_> {
+impl Display for DiagnosticMessageDisplay<'_, '_, '_, '_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.message {
             DiagnosticMessage::String(string) => write!(f, "{string}"),
             DiagnosticMessage::Format(format) => {
                 for part in format {
-                    part.fmt(f, self.types, self.strings)?;
+                    part.fmt(f, self.types, self.strings, self.source_texts)?;
                 }
                 Ok(())
             }
@@ -133,14 +223,16 @@ impl Display for DiagnosticMessageDisplay<'_, '_, '_> {
 }
 
 impl DiagnosticMessage {
-    fn display<'a, 'b, 'c>(
-        &'c self,
+    fn display<'a, 'b, 'c, 'd>(
+        &'d self,
         types: &'a Types,
         strings: &'b StringInterner,
-    ) -> DiagnosticMessageDisplay<'a, 'b, 'c> {
+        source_texts: &'c SourceText,
+    ) -> DiagnosticMessageDisplay<'a, 'b, 'c, 'd> {
         DiagnosticMessageDisplay {
             types,
             strings,
+            source_texts,
             message: self,
         }
     }
@@ -357,14 +449,14 @@ impl Diagnostic {
     fn missing_fields_in_struct_initialisation(
         location: Location,
         type_: TypeId,
-        missing_fields: Vec<StringId>,
+        missing_fields: Vec<Parameter>,
     ) -> Diagnostic {
         Self {
             location,
             message: dgnst!(
                 "Not all fields of ",
                 type_,
-                " has been initialised. The following fields are missing:\n",
+                " has been initialised. The following fields are missing:",
                 BulletList(location, missing_fields)
             ),
         }
@@ -468,9 +560,11 @@ impl Diagnostics {
         files: &SourceText,
         types: &Types,
         strings: &StringInterner,
+        source_texts: &SourceText,
     ) -> Result<(), std::io::Error> {
         for diagnostic in &self.diagnostics {
-            let m: DiagnosticMessageDisplay = diagnostic.message.display(&types, &strings);
+            let m: DiagnosticMessageDisplay =
+                diagnostic.message.display(&types, &strings, source_texts);
             writeln!(
                 out,
                 "[{}:{}:{}] {m}",
@@ -537,14 +631,17 @@ impl Diagnostics {
         &mut self,
         location: Location,
         type_: TypeId,
-        missing_fields: Vec<StringId>,
+        missing_fields: Vec<(StringId, TypeId)>,
         definition: Location,
     ) {
         self.diagnostics
             .push(Diagnostic::missing_fields_in_struct_initialisation(
                 location,
                 type_,
-                missing_fields,
+                missing_fields
+                    .into_iter()
+                    .map(|(n, t)| Parameter(n, t))
+                    .collect(),
             ));
         self.diagnostics.push(Diagnostic::definition_at(definition));
     }

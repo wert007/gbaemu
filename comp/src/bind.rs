@@ -1010,10 +1010,10 @@ impl Binder {
         for actual in fields.iter() {
             assigned.insert(actual.identifier, true);
         }
-        let missing: Vec<StringId> = assigned
+        let missing: Vec<(StringId, TypeId)> = assigned
             .into_iter()
-            .filter(|(k, v)| !v)
-            .map(|(n, _)| n)
+            .filter(|(_, v)| !v)
+            .map(|(n, _)| (n, struct_type.get_field_type_by_name(n).unwrap()))
             .collect();
         if !missing.is_empty() {
             compiler
