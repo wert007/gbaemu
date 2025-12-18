@@ -1,5 +1,5 @@
 use crate::{
-    BoundId, Compiler, HasLocation, StringInterner,
+    BoundId, BoundTree, Compiler, HasLocation, StringInterner,
     bind::BoundBinaryOperator,
     syntax_tree::{Parsed, SyntaxNode, SyntaxNodeKind, SyntaxTree},
     typing::{TypeId, Types},
@@ -42,6 +42,15 @@ impl Variables {
     }
 }
 
+impl BoundTree {
+    pub fn dump(&self) {
+        for (i, node) in self.elements.iter().enumerate() {
+            let kind: &'static str = (&node.kind).into();
+            println!("{i:4}: {kind}");
+        }
+    }
+}
+
 pub(crate) fn dump_bound_tree(node: BoundId, compiler: &Compiler) {
     // panic!();
     dump_bound_tree_recursive(node, compiler, 0)
@@ -51,7 +60,7 @@ fn dump_bound_tree_recursive(node: BoundId, compiler: &Compiler, indent: usize) 
     let n = |v: VariableId| &compiler.strings[v];
     let t = |v: TypeId| compiler.types.to_string(v, &compiler.strings);
     emit_indent(indent);
-    // dbg!(&compiler.nodes[node]);
+    print!("[id={}]", node.0);
     let stage = &compiler.nodes[node].stage;
     match &compiler.nodes[node].kind {
         SyntaxNodeKind::Error => println!("Error"),
@@ -68,8 +77,7 @@ fn dump_bound_tree_recursive(node: BoundId, compiler: &Compiler, indent: usize) 
             let value = compiler.nodes[const_declaration_node.expr]
                 .stage
                 .constant_value
-                .as_ref()
-                .unwrap();
+                .as_ref();
             println!(
                 "const {}: {} = {:?}",
                 n(const_declaration_node.identifier),
@@ -108,7 +116,7 @@ fn dump_bound_tree_recursive(node: BoundId, compiler: &Compiler, indent: usize) 
             }
         }
         SyntaxNodeKind::ExpressionStatement(expression_statement_node) => {
-            dump_bound_tree_recursive(expression_statement_node.expression, compiler, indent);
+            dump_bound_tree_recursive(expression_statement_node.expression, compiler, 0);
         }
         SyntaxNodeKind::BlockExpression(block_expression_node) => {
             println!("Block: {}", t(stage.type_));
@@ -157,10 +165,21 @@ fn dump_bound_tree_recursive(node: BoundId, compiler: &Compiler, indent: usize) 
                 dump_bound_tree_recursive(field.expression, compiler, 0);
             }
         }
-        SyntaxNodeKind::FieldAccess(field_access_node) => todo!(),
+        SyntaxNodeKind::FieldAccess(field_access_node) => {
+            println!(
+                "Accessing field {} of",
+                &compiler.strings[field_access_node.field]
+            );
+            dump_bound_tree_recursive(field_access_node.base, compiler, indent + 1);
+        }
         SyntaxNodeKind::ImplBlock(impl_block_node) => todo!(),
         SyntaxNodeKind::PartialCapture(partial_capture_node) => {
-            println!("Partial capture for {}", n(partial_capture_node.identifier));
+            println!("Partial capture:");
+            emit_indent(indent);
+            println!("Base:");
+            dump_bound_tree_recursive(partial_capture_node.identifier, compiler, indent + 1);
+            emit_indent(indent);
+            println!("Captured arguments:");
             for argument in &partial_capture_node.arguments {
                 dump_bound_tree_recursive(*argument, compiler, indent + 1);
             }

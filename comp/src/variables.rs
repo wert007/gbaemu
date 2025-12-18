@@ -2,7 +2,7 @@ use std::{collections::HashMap, ops::Index};
 
 use crate::{HasLocation, Location, StringId, typing::TypeId};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct VariableDeclaration {
     pub location: Location,
     pub id: VariableId,

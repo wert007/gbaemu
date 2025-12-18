@@ -25,7 +25,8 @@ impl ConstEvaluator {
     }
 
     fn read(&self, identifier: VariableId) -> Option<Value> {
-        self.variables.get(&identifier).cloned()
+        let result = self.variables.get(&identifier).cloned();
+        result
     }
 }
 
@@ -110,7 +111,6 @@ fn evaluate_expression(
             evaluate_partial_capture(&partial_capture_node, compiler, evaluator)
         }
     };
-
     compiler.nodes.set_constant_value(expression, value.clone());
     value
 }
@@ -120,7 +120,7 @@ fn evaluate_partial_capture(
     compiler: &mut Compiler,
     evaluator: &mut ConstEvaluator,
 ) -> Option<Value> {
-    let base = evaluator.read(partial_capture_node.identifier)?;
+    let base = evaluate_expression(partial_capture_node.identifier, compiler, evaluator)?;
     let arguments: Option<Vec<_>> = partial_capture_node
         .arguments
         .iter()

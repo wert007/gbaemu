@@ -289,7 +289,6 @@ impl Lexer {
                 }
             }
         };
-        // dbg!(result);
         result
     }
 

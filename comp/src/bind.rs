@@ -9,6 +9,7 @@ use crate::{
     lexer::{Token, TokenKind},
     parser::Parser,
     syntax_tree::*,
+    traits::{Trait, TraitFunction},
     typing::{EnumType, FunctionType, StructLayout, StructType, Type, TypeId, Types},
     value::Value,
     variables::VariableId,
@@ -919,7 +920,6 @@ impl Binder {
             identifier,
             fields,
             layout,
-            associated_functions: Vec::new(),
         }));
         self.register_constant(identifier, Value::Type(type_));
 
@@ -1073,30 +1073,38 @@ impl Binder {
         let base = self.bind_node(*field_access_node.base, TypeId::UNKNOWN, compiler);
         let field_identifier = compiler.intern_location(field_access_node.field.location());
         let base_type = compiler.nodes.type_of(base);
-        match compiler
-            .types
-            .associated_function_type(base_type, field_identifier)
-        {
-            Some((identifier, type_)) => {
-                SyntaxNode::<Bound>::partial_capture(location, identifier, vec![base], type_, id)
+        let traits = compiler.trait_implementors.find_traits(base_type);
+        for t in traits {
+            let Some(function) = compiler.traits[*t].find_function_by_name(field_identifier) else {
+                continue;
+            };
+            let type_ = function.type_;
+            let vid = unsafe { compiler.nodes.prepare_id() };
+            let identifier = SyntaxNode::<Bound>::variable(
+                location,
+                &compiler.variables[function.name],
+                Some(Value::CompileTimeFunction(function.implementation)),
+                vid,
+            );
+            unsafe { compiler.nodes.set(vid, identifier) };
+            return SyntaxNode::<Bound>::partial_capture(location, vid, vec![base], type_, id);
+        }
+        match compiler.types.field_type(base_type, field_identifier) {
+            Some(type_) => {
+                SyntaxNode::<Bound>::field_access(location, base, field_identifier, type_, id)
             }
-            None => match compiler.types.field_type(base_type, field_identifier) {
-                Some(type_) => {
-                    SyntaxNode::<Bound>::field_access(location, base, field_identifier, type_, id)
+            None => {
+                if base_type != TypeId::ERROR {
+                    compiler
+                        .diagnostics
+                        .report_cannot_find_field_with_this_name(
+                            location,
+                            base_type,
+                            field_identifier,
+                        );
                 }
-                None => {
-                    if base_type != TypeId::ERROR {
-                        compiler
-                            .diagnostics
-                            .report_cannot_find_field_with_this_name(
-                                location,
-                                base_type,
-                                field_identifier,
-                            );
-                    }
-                    SyntaxNode::<Bound>::error(location, id)
-                }
-            },
+                SyntaxNode::<Bound>::error(location, id)
+            }
         }
     }
 
@@ -1115,7 +1123,8 @@ impl Binder {
         let struct_type = compiler
             .variables
             .find_by_name(&namespaces, identifier)
-            .unwrap();
+            .unwrap()
+            .clone();
         let type_ = self
             .look_up_constant(struct_type.id)
             .unwrap()
@@ -1128,21 +1137,44 @@ impl Binder {
             .into_iter()
             .map(|f| self.bind_node(f, TypeId::VOID, compiler))
             .collect();
-        let struct_type = compiler.types.as_struct_type_mut(type_).unwrap();
-        for id in functions {
-            if compiler.nodes.type_of(id) == TypeId::ERROR {
-                continue;
-            }
-            let f = compiler.nodes[id]
-                .kind
-                .as_function_declaration()
-                .expect("Only supported for now!");
-            let variable = f.identifier;
-            let type_ = compiler.variables.type_of(variable);
-            // TODO: This should probably not live in the struct type!
-            struct_type.associated_functions.push((variable, type_));
-            self.register_constant(variable, Value::CompileTimeFunction(f.body));
-        }
+        let struct_trait = Trait {
+            name: struct_type.id,
+            functions: functions
+                .iter()
+                .map(|id| {
+                    let f = compiler.nodes[*id]
+                        .kind
+                        .as_function_declaration()
+                        .expect("Only supported for now!");
+                    let body = f.body;
+                    let variable = f.identifier;
+                    let type_ = compiler.variables.type_of(variable);
+                    TraitFunction {
+                        type_,
+                        name: f.identifier,
+                        implementation: body,
+                    }
+                })
+                .collect(),
+        };
+        let trait_id = compiler.traits.register(struct_trait);
+        compiler.trait_implementors.register(type_, trait_id);
+        // let struct_type = compiler.types.as_struct_type_mut(type_).unwrap();
+        // for id in functions {
+        //     if compiler.nodes.type_of(id) == TypeId::ERROR {
+        //         continue;
+        //     }
+        //     let f = compiler.nodes[id]
+        //         .kind
+        //         .as_function_declaration()
+        //         .expect("Only supported for now!");
+        //     let variable = f.identifier;
+        //     let type_ = compiler.variables.type_of(variable);
+        //     // TODO: This should probably not live in the struct type!
+        //     // struct_type.associated_functions.push((variable, type_));
+        //     todo!();
+        //     self.register_constant(variable, Value::CompileTimeFunction(f.body));
+        // }
         compiler.variables.pop_namespace();
         // TODO: This can be better
         unsafe { SyntaxNode::<Bound>::empty(id) }

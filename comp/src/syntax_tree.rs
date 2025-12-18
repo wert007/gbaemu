@@ -444,7 +444,7 @@ impl SyntaxNode<Bound> {
 
     pub(crate) fn partial_capture(
         location: Location,
-        identifier: VariableId,
+        identifier: BoundId,
         arguments: Vec<BoundId>,
         type_: TypeId,
         id: BoundId,
@@ -775,7 +775,7 @@ impl SyntaxNode<Parsed> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, strum::IntoStaticStr)]
 pub enum SyntaxNodeKind<S: Stage> {
     Error,
     Program(ProgramNode<S>),
@@ -856,7 +856,7 @@ pub struct FieldAccessNode<S: Stage> {
 
 #[derive(Debug, Clone)]
 pub struct PartialCaptureNode<S: Stage> {
-    pub identifier: S::Identifier,
+    pub identifier: S::ChildNodeBoxed,
     pub arguments: Vec<S::ChildNode>,
 }
 

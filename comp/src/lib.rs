@@ -7,6 +7,7 @@ use crate::{
     memory::Memoryblock,
     parser::Parser,
     syntax_tree::{Bound, Parsed, SyntaxNode, SyntaxTree},
+    traits::{TraitImplementors, Traits},
     typing::Types,
     value::Value,
     variables::{VariableId, Variables},
@@ -21,6 +22,7 @@ mod lexer;
 mod memory;
 mod parser;
 mod syntax_tree;
+mod traits;
 mod typing;
 mod value;
 mod variables;
@@ -34,6 +36,8 @@ pub struct Compiler {
     pub types: Types,
     pub const_memory: Memoryblock<memory::Bound>,
     pub variables: Variables,
+    pub traits: Traits,
+    pub trait_implementors: TraitImplementors,
 }
 
 impl Index<SourceTextId> for Compiler {
@@ -63,6 +67,8 @@ impl Compiler {
             nodes: BoundTree::new(),
             const_memory: Memoryblock::new(),
             variables: Variables::new(),
+            trait_implementors: TraitImplementors::new(),
+            traits: Traits::new(),
         }
     }
 
@@ -363,8 +369,8 @@ impl BoundTree {
 
     unsafe fn set(&mut self, id: BoundId, node: SyntaxNode<Bound>) {
         assert!(id.0 < self.elements.len() + self.reserved);
-        self.reserved -= 1;
         while self.elements.len() <= id.0 {
+            self.reserved -= 1;
             self.elements
                 .push(unsafe { SyntaxNode::<Bound>::empty(BoundId(0)) });
         }
@@ -373,6 +379,7 @@ impl BoundTree {
 
     unsafe fn silent_set(&mut self, id: BoundId, node: SyntaxNode<Bound>) {
         while self.elements.len() <= id.0 {
+            self.reserved -= 1;
             self.elements
                 .push(unsafe { SyntaxNode::<Bound>::empty(BoundId(0)) });
         }
@@ -393,6 +400,7 @@ impl BoundTree {
     }
 
     unsafe fn free_last(&mut self) {
+        // self.reserved -= 1;
         self.elements.pop();
     }
 }

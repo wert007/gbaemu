@@ -73,21 +73,10 @@ pub struct StructType {
     pub identifier: VariableId,
     pub fields: Vec<(Location, StringId, TypeId)>,
     pub layout: StructLayout,
-    pub associated_functions: Vec<(VariableId, TypeId)>,
 }
 impl StructType {
     pub(crate) fn get_field_type_by_name(&self, identifier: StringId) -> Option<TypeId> {
         self.fields.iter().find(|f| f.1 == identifier).map(|f| f.2)
-    }
-
-    pub(crate) fn get_associated_function_by_name(
-        &self,
-        identifier: StringId,
-    ) -> Option<(VariableId, TypeId)> {
-        self.associated_functions
-            .iter()
-            .find(|f| f.0.1 == identifier)
-            .copied()
     }
 }
 
@@ -313,20 +302,6 @@ impl Types {
         match &self[base_type] {
             Type::Reference(inner) => self.field_type(*inner, field_identifier),
             Type::Struct(struct_type) => struct_type.get_field_type_by_name(field_identifier),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn associated_function_type(
-        &self,
-        base_type: TypeId,
-        field_identifier: StringId,
-    ) -> Option<(VariableId, TypeId)> {
-        match &self[base_type] {
-            Type::Reference(inner) => self.associated_function_type(*inner, field_identifier),
-            Type::Struct(struct_type) => {
-                struct_type.get_associated_function_by_name(field_identifier)
-            }
             _ => None,
         }
     }
