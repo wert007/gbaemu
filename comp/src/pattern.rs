@@ -1,6 +1,6 @@
 use crate::{
-    BoundId, Compiler, bind::Binder, intern_namespaced_identifier, syntax_tree::*, typing::TypeId,
-    value::Value,
+    BoundId, Compiler, StringId, bind::Binder, intern_namespaced_identifier, syntax_tree::*,
+    typing::TypeId, value::Value,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -73,6 +73,9 @@ fn bind_identifier(
     binder: &mut Binder,
 ) -> Pattern {
     let (namespaces, name) = intern_namespaced_identifier(namespaced_identifier, compiler);
+    if namespaces.is_empty() && name == StringId::UNDERSCORE {
+        return Pattern::Ignore;
+    }
     if let Some(variable) = compiler.variables.find_by_name(&namespaces, name) {
         if let Some(value) = binder.look_up_constant(variable.id) {
             Pattern::Constant(value)

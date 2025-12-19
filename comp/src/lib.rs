@@ -124,14 +124,21 @@ pub fn intern_namespaced_identifier(
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StringId(usize);
 
+impl StringId {
+    pub const UNDERSCORE: StringId = StringId(0);
+}
+
 pub struct StringInterner {
     strings: Vec<String>,
 }
 impl StringInterner {
     fn new() -> Self {
-        Self {
+        let mut result = Self {
             strings: Vec::new(),
-        }
+        };
+        assert_eq!(result.intern("_"), StringId::UNDERSCORE);
+
+        result
     }
 
     fn intern(&mut self, string: impl Into<String>) -> StringId {
