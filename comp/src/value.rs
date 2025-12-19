@@ -1,6 +1,6 @@
 use crate::{BoundId, typing::TypeId};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Value {
     Error,
     UnsignedInteger8(u8),

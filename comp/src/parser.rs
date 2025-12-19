@@ -5,7 +5,7 @@ use crate::{
     lexer::{Lexer, Token, TokenKind},
     syntax_tree::{
         ArrayTypeIdentifier, EnumVariantNode, FieldInitilizationNode, FunctionHeaderNode,
-        GenericParameterHeaderNode, GenericParameterNode, NamedTypeIdentifier,
+        GenericParameterHeaderNode, GenericParameterNode, MatchArmNode, NamedTypeIdentifier,
         NamespacedIdentifier, ParameterNode, Parsed, SyntaxNode, SyntaxTree, ThisTypeIdentifier,
         TypeIdentifier,
     },
@@ -164,8 +164,7 @@ impl Parser {
         minimal_precedence: usize,
         compiler: &mut Compiler,
     ) -> SyntaxNode<Parsed> {
-        let expression = self.parse_expression_atom(compiler);
-        let mut expression = self.parse_function_call_or_field_access(expression, compiler);
+        let mut expression = self.parse_binary_operand(compiler);
         while let Some((lhs, rhs)) = self.peek(0, compiler).binary_precedence() {
             if lhs < minimal_precedence {
                 break;
@@ -572,5 +571,31 @@ impl Parser {
         let comma = self.maybe_expect(TokenKind::Comma, compiler);
         EnumVariantNode::new(identifier, comma)
         // SyntaxNode::<Parsed>::enum_variant(name, comma)
+    }
+
+    fn parse_binary_operand(&mut self, compiler: &mut Compiler) -> SyntaxNode<Parsed> {
+        if self.peek(0, compiler) == TokenKind::MatchKeyword {
+            self.parse_match_expression(compiler)
+        } else {
+            let expression = self.parse_expression_atom(compiler);
+            self.parse_function_call_or_field_access(expression, compiler)
+        }
+    }
+
+    fn parse_match_expression(&mut self, compiler: &mut Compiler) -> SyntaxNode<Parsed> {
+        let match_keyword = self.expect(TokenKind::MatchKeyword, compiler);
+        let expression = self.parse_expression(compiler);
+        let lbrace = self.expect(TokenKind::LBrace, compiler);
+        let arms = self.parse_until(TokenKind::RBrace, compiler, |p, c| p.parse_match_arm(c));
+        let rbrace = self.expect(TokenKind::RBrace, compiler);
+        SyntaxNode::<Parsed>::match_expression(match_keyword, expression, lbrace, arms, rbrace)
+    }
+
+    fn parse_match_arm(&mut self, compiler: &mut Compiler) -> MatchArmNode<Parsed> {
+        let pattern = self.parse_namespaced_identifier(compiler);
+        let fat_arrow = self.expect(TokenKind::FatArrow, compiler);
+        let body = self.parse_expression(compiler);
+        let comma = self.maybe_expect(TokenKind::Comma, compiler);
+        MatchArmNode::<Parsed>::new(pattern, fat_arrow, body, comma)
     }
 }

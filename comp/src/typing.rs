@@ -57,6 +57,13 @@ impl Type {
             _ => false,
         }
     }
+
+    pub(crate) fn is_enum(&self) -> bool {
+        match self {
+            Type::Enum(_) => true,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

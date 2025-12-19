@@ -2,6 +2,7 @@
 use crate::StringId;
 use crate::bind::BoundBinaryOperator;
 use crate::bind::conversion::ConversionKind;
+use crate::pattern::Pattern;
 use crate::variables::VariableId;
 use crate::{BoundId, HasLocation, Location, lexer::Token, typing::TypeId, value::Value};
 use std::fmt::Debug;
@@ -29,6 +30,7 @@ pub trait Stage: Debug + Clone {
     type Type: Debug + Clone;
     type ChildNodeBoxed: Debug + Clone;
     type ChildNode: Debug + Clone;
+    type Pattern: Debug + Clone;
 }
 
 impl Stage for Parsed {
@@ -39,6 +41,7 @@ impl Stage for Parsed {
     type Type = TypeIdentifier;
     type ChildNodeBoxed = Box<Self::ChildNode>;
     type ChildNode = SyntaxNode<Parsed>;
+    type Pattern = NamespacedIdentifier;
 }
 
 impl Stage for Bound {
@@ -49,6 +52,7 @@ impl Stage for Bound {
     type Type = TypeId;
     type ChildNode = BoundId;
     type ChildNodeBoxed = BoundId;
+    type Pattern = crate::pattern::Pattern;
 }
 
 #[derive(Debug, Clone)]
@@ -462,6 +466,30 @@ impl SyntaxNode<Bound> {
             },
         }
     }
+
+    pub(crate) fn match_expression(
+        location: Location,
+        expression: BoundId,
+        arms: Vec<MatchArmNode<Bound>>,
+        type_: TypeId,
+        id: BoundId,
+    ) -> SyntaxNode<Bound> {
+        Self {
+            location,
+            stage: Bound {
+                id,
+                type_,
+                constant_value: None,
+            },
+            kind: SyntaxNodeKind::MatchExpression(MatchExpressionNode {
+                match_keyword: (),
+                expression,
+                lbrace: (),
+                arms,
+                rbrace: (),
+            }),
+        }
+    }
 }
 
 fn to_option(value: bool) -> Option<()> {
@@ -773,6 +801,27 @@ impl SyntaxNode<Parsed> {
             stage: Parsed,
         }
     }
+
+    pub(crate) fn match_expression(
+        match_keyword: Token,
+        expression: SyntaxNode<Parsed>,
+        lbrace: Token,
+        arms: Vec<MatchArmNode<Parsed>>,
+        rbrace: Token,
+    ) -> SyntaxNode<Parsed> {
+        let location = match_keyword.location().combine(rbrace.location());
+        Self {
+            location,
+            kind: SyntaxNodeKind::MatchExpression(MatchExpressionNode {
+                match_keyword,
+                expression: Box::new(expression),
+                lbrace,
+                arms,
+                rbrace,
+            }),
+            stage: Parsed,
+        }
+    }
 }
 
 #[derive(Debug, Clone, strum::IntoStaticStr)]
@@ -797,6 +846,51 @@ pub enum SyntaxNodeKind<S: Stage> {
     ImplBlock(ImplBlockNode<S>),
     PartialCapture(PartialCaptureNode<S>),
     EnumDeclaration(EnumDeclarationNode<S>),
+    MatchExpression(MatchExpressionNode<S>),
+}
+
+#[derive(Debug, Clone)]
+pub struct MatchExpressionNode<S: Stage> {
+    match_keyword: S::Token,
+    pub expression: S::ChildNodeBoxed,
+    lbrace: S::Token,
+    pub arms: Vec<MatchArmNode<S>>,
+    rbrace: S::Token,
+}
+
+#[derive(Debug, Clone)]
+pub struct MatchArmNode<S: Stage> {
+    pub pattern: S::Pattern,
+    fat_arrow: S::Token,
+    pub body: S::ChildNodeBoxed,
+    comma: Option<S::Token>,
+}
+
+impl MatchArmNode<Parsed> {
+    pub fn new(
+        pattern: NamespacedIdentifier,
+        fat_arrow: Token,
+        body: SyntaxNode<Parsed>,
+        comma: Option<Token>,
+    ) -> Self {
+        Self {
+            pattern,
+            fat_arrow,
+            body: Box::new(body),
+            comma,
+        }
+    }
+}
+
+impl MatchArmNode<Bound> {
+    pub fn new(pattern: Pattern, body: BoundId) -> Self {
+        Self {
+            pattern,
+            fat_arrow: (),
+            body,
+            comma: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

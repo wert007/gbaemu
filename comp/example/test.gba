@@ -48,4 +48,14 @@ enum BinaryResult {
     Error,
 }
 
+impl BinaryResult {
+    fn is_success(this): bool {
+        match this {
+            BinaryResult::Success => true,
+            BinaryResult::Error => false,
+        }
+    }
+}
+
 const r = BinaryResult::Success;
+const s = r.is_success();

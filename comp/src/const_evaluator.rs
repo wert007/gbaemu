@@ -110,9 +110,26 @@ fn evaluate_expression(
         SyntaxNodeKind::PartialCapture(partial_capture_node) => {
             evaluate_partial_capture(&partial_capture_node, compiler, evaluator)
         }
+        SyntaxNodeKind::MatchExpression(match_expression) => {
+            evaluate_match_expression(&match_expression, compiler, evaluator)
+        }
     };
     compiler.nodes.set_constant_value(expression, value.clone());
     value
+}
+
+fn evaluate_match_expression(
+    match_expression: &MatchExpressionNode<Bound>,
+    compiler: &mut Compiler,
+    evaluator: &mut ConstEvaluator,
+) -> Option<Value> {
+    let expression = evaluate_expression(match_expression.expression, compiler, evaluator)?;
+    for arm in &match_expression.arms {
+        if arm.pattern.matches(expression) {
+            return evaluate_expression(arm.body, compiler, evaluator);
+        }
+    }
+    unreachable!("Maybe this should return Value::Error instead.")
 }
 
 fn evaluate_partial_capture(
@@ -371,6 +388,7 @@ fn read_value(
             const_memory.read(*wptr, &mut buffer);
             match t {
                 TypeId::POINTER => Value::Pointer(u32::from_le_bytes(buffer) as usize),
+                e if types[e].is_enum() => Value::UnsignedInteger32(u32::from_le_bytes(buffer)),
                 TypeId::UNSIGNED_INTEGER_32 => Value::UnsignedInteger32(u32::from_le_bytes(buffer)),
                 t if types.as_inner_array_type(t).is_some()
                     || types.as_struct_type(t).is_some() =>

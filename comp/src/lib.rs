@@ -21,6 +21,7 @@ mod diagnostics;
 mod lexer;
 mod memory;
 mod parser;
+mod pattern;
 mod syntax_tree;
 mod traits;
 mod typing;

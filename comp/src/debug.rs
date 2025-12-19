@@ -184,6 +184,20 @@ fn dump_bound_tree_recursive(node: BoundId, compiler: &Compiler, indent: usize) 
                 dump_bound_tree_recursive(*argument, compiler, indent + 1);
             }
         }
+        SyntaxNodeKind::MatchExpression(match_expression) => {
+            println!("Match: {}", t(stage.type_));
+            dump_bound_tree_recursive(match_expression.expression, compiler, indent + 1);
+            emit_indent(indent);
+            println!("Match-Arms");
+            for arm in &match_expression.arms {
+                emit_indent(indent + 1);
+                match arm.pattern {
+                    crate::pattern::Pattern::Ignore => println!("_ => "),
+                    crate::pattern::Pattern::Constant(value) => println!("{value:?} => "),
+                }
+                dump_bound_tree_recursive(arm.body, compiler, indent + 2);
+            }
+        }
     }
 }
 
@@ -339,6 +353,17 @@ fn dump_parse_node(node: &SyntaxNode<Parsed>, compiler: &mut Compiler, indent: u
         }
         SyntaxNodeKind::PartialCapture(partial_capture_node) => {
             todo!()
+        }
+        SyntaxNodeKind::MatchExpression(match_expression) => {
+            println!("Match expression:");
+            dump_parse_node(&match_expression.expression, compiler, indent + 1);
+            emit_indent(indent);
+            println!("Match Arms:");
+            for arm in &match_expression.arms {
+                emit_indent(indent + 1);
+                println!("{} => ", &compiler[arm.pattern.location]);
+                dump_parse_node(&arm.body, compiler, indent + 2);
+            }
         }
     }
 }

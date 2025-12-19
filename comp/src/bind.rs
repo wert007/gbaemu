@@ -8,6 +8,7 @@ use crate::{
     const_evaluator,
     lexer::{Token, TokenKind},
     parser::Parser,
+    pattern::Pattern,
     syntax_tree::*,
     traits::{Trait, TraitFunction},
     typing::{EnumType, FunctionType, StructLayout, StructType, Type, TypeId, Types},
@@ -155,6 +156,9 @@ impl Binder {
                 self.bind_struct_literal(struct_literal_node, location, compiler, id)
             }
             SyntaxNodeKind::PartialCapture(_partial_capture_node) => unreachable!(),
+            SyntaxNodeKind::MatchExpression(match_expression) => {
+                self.bind_match_expression(match_expression, expected, location, compiler, id)
+            }
         };
         unsafe {
             compiler.nodes.set(id, node.clone());
@@ -1212,6 +1216,62 @@ impl Binder {
         };
         self.register_constant(variant, Value::UnsignedInteger32(i));
         variant
+    }
+
+    fn bind_match_expression(
+        &mut self,
+        match_expression: MatchExpressionNode<Parsed>,
+        expected: TypeId,
+        location: Location,
+        compiler: &mut Compiler,
+        id: BoundId,
+    ) -> SyntaxNode<Bound> {
+        let expression = self.bind_node(*match_expression.expression, TypeId::UNKNOWN, compiler);
+        let expression_type = compiler.nodes.type_of(expression);
+        let arms: Vec<MatchArmNode<Bound>> = match_expression
+            .arms
+            .into_iter()
+            .map(|a| self.bind_match_arm(a, expression_type, expected, compiler))
+            .collect();
+        let type_ = arms
+            .iter()
+            .map(|a| compiler.nodes.type_of(a.body))
+            .fold(TypeId::VOID, |a, c| if a == TypeId::VOID { c } else { a });
+        let arms: Vec<_> = arms
+            .into_iter()
+            .map(|a| {
+                let body = self.bind_conversion(a.body, type_, compiler, ConversionKind::Implicit);
+                MatchArmNode::<Bound>::new(a.pattern, body)
+            })
+            .collect();
+        SyntaxNode::<Bound>::match_expression(location, expression, arms, type_, id)
+    }
+
+    fn bind_match_arm(
+        &mut self,
+        arm: MatchArmNode<Parsed>,
+        expression_type: TypeId,
+        expected: TypeId,
+        compiler: &mut Compiler,
+    ) -> MatchArmNode<Bound> {
+        let pattern = self.bind_pattern(arm.pattern, expression_type, compiler);
+        let body = self.bind_node(*arm.body, expected, compiler);
+        MatchArmNode::<Bound>::new(pattern, body)
+    }
+
+    fn bind_pattern(
+        &mut self,
+        pattern: <Parsed as Stage>::Pattern,
+        type_: TypeId,
+        compiler: &mut Compiler,
+    ) -> Pattern {
+        let fake_id = unsafe { BoundId::from_raw(usize::MAX) };
+        let value = self
+            .bind_identifier(pattern, compiler, fake_id)
+            .stage
+            .constant_value
+            .expect("todo error handling!");
+        Pattern::Constant(value)
     }
 }
 

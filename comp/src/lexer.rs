@@ -48,6 +48,7 @@ impl Token {
     fn multi_char(location: Location, chars: &[char]) -> Token {
         let kind = match chars {
             [':', ':'] => TokenKind::ColonColon,
+            ['=', '>'] => TokenKind::FatArrow,
             _ => TokenKind::Error,
         };
         Self {
@@ -76,6 +77,7 @@ impl Token {
             "enum" => TokenKind::EnumKeyword,
             "impl" => TokenKind::ImplKeyword,
             "this" => TokenKind::ThisKeyword,
+            "match" => TokenKind::MatchKeyword,
             _ => TokenKind::Identifier,
         };
         Self {
@@ -115,6 +117,7 @@ pub enum TokenKind {
     Comma,
     Colon,
     ColonColon,
+    FatArrow,
     LParen,
     RParen,
     CompKeyword,
@@ -128,6 +131,7 @@ pub enum TokenKind {
     Period,
     ImplKeyword,
     ThisKeyword,
+    MatchKeyword,
     Ampersand,
 }
 impl TokenKind {
@@ -176,7 +180,9 @@ impl TokenKind {
             TokenKind::GreaterThan => ">",
             TokenKind::ImplKeyword => "impl keyword",
             TokenKind::ThisKeyword => "this keyword",
+            TokenKind::MatchKeyword => "match keyword",
             TokenKind::Ampersand => "&",
+            TokenKind::FatArrow => "=>",
         }
     }
 }
@@ -301,6 +307,7 @@ fn followed_by(ch: char) -> &'static [char] {
     match ch {
         '/' => &['/'],
         ':' => &[':'],
+        '=' => &['>'],
         _ => &[],
     }
 }
