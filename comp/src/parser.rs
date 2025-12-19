@@ -156,7 +156,11 @@ impl Parser {
     }
 
     fn parse_expression(&mut self, compiler: &mut Compiler) -> SyntaxNode<Parsed> {
-        self.parse_binary(0, compiler)
+        match self.peek(0, compiler) {
+            TokenKind::LBrace => self.parse_block_expression(compiler),
+            TokenKind::MatchKeyword => self.parse_match_expression(compiler),
+            _ => self.parse_binary(0, compiler),
+        }
     }
 
     fn parse_binary(
@@ -592,10 +596,14 @@ impl Parser {
     }
 
     fn parse_match_arm(&mut self, compiler: &mut Compiler) -> MatchArmNode<Parsed> {
-        let pattern = self.parse_namespaced_identifier(compiler);
+        let pattern = self.parse_pattern(compiler);
         let fat_arrow = self.expect(TokenKind::FatArrow, compiler);
         let body = self.parse_expression(compiler);
         let comma = self.maybe_expect(TokenKind::Comma, compiler);
         MatchArmNode::<Parsed>::new(pattern, fat_arrow, body, comma)
+    }
+
+    fn parse_pattern(&mut self, compiler: &mut Compiler) -> SyntaxNode<Parsed> {
+        self.parse_expression(compiler)
     }
 }

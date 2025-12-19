@@ -6,7 +6,7 @@ use crate::{
     lexer::{Lexer, Token},
     memory::Memoryblock,
     parser::Parser,
-    syntax_tree::{Bound, Parsed, SyntaxNode, SyntaxTree},
+    syntax_tree::{Bound, NamespacedIdentifier, Parsed, SyntaxNode, SyntaxTree},
     traits::{TraitImplementors, Traits},
     typing::Types,
     value::Value,
@@ -106,6 +106,19 @@ impl Compiler {
         self.diagnostics
             .write_to(out, &self.files, &self.types, &self.strings, &self.files)
     }
+}
+
+pub fn intern_namespaced_identifier(
+    namespaced_identifier: NamespacedIdentifier,
+    compiler: &mut Compiler,
+) -> (Vec<StringId>, StringId) {
+    let namespaces: Vec<_> = namespaced_identifier
+        .namespaces
+        .into_iter()
+        .map(|n| compiler.intern_location(n.0.location()))
+        .collect();
+    let identifier = compiler.intern_location(namespaced_identifier.identifier.location());
+    (namespaces, identifier)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

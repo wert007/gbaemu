@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::{
     BoundId, Compiler, HasLocation, Location, SourceTextId, StringId,
     bind::conversion::ConversionKind,
-    const_evaluator,
+    const_evaluator, intern_namespaced_identifier,
     lexer::{Token, TokenKind},
     parser::Parser,
     pattern::Pattern,
@@ -194,7 +194,7 @@ impl Binder {
         self.bind_node_with_id(node, expected, compiler, id)
     }
 
-    fn bind_literal(
+    pub fn bind_literal(
         &mut self,
         token: Token,
         expected: TypeId,
@@ -488,7 +488,7 @@ impl Binder {
         SyntaxNode::<Bound>::binary(location, lhs, op, rhs, return_type, id)
     }
 
-    fn look_up_constant(&self, id: VariableId) -> Option<Value> {
+    pub fn look_up_constant(&self, id: VariableId) -> Option<Value> {
         self.constants.get(&id).cloned()
     }
 
@@ -1233,10 +1233,24 @@ impl Binder {
             .into_iter()
             .map(|a| self.bind_match_arm(a, expression_type, expected, compiler))
             .collect();
-        let type_ = arms
-            .iter()
-            .map(|a| compiler.nodes.type_of(a.body))
-            .fold(TypeId::VOID, |a, c| if a == TypeId::VOID { c } else { a });
+        let type_ =
+            arms.iter()
+                .map(|a| compiler.nodes.type_of(a.body))
+                .fold(TypeId::VOID, |acc, cur| {
+                    if acc == TypeId::VOID {
+                        if compiler.types[cur].is_integer_literal() {
+                            TypeId::UNSIGNED_INTEGER_32
+                        } else {
+                            cur
+                        }
+                    } else if ConversionKind::Implicit.convert(acc, cur, &mut compiler.types) {
+                        cur
+                    } else if ConversionKind::Implicit.convert(cur, acc, &mut compiler.types) {
+                        acc
+                    } else {
+                        acc
+                    }
+                });
         let arms: Vec<_> = arms
             .into_iter()
             .map(|a| {
@@ -1265,25 +1279,7 @@ impl Binder {
         type_: TypeId,
         compiler: &mut Compiler,
     ) -> Pattern {
-        let fake_id = unsafe { BoundId::from_raw(usize::MAX) };
-        let value = self
-            .bind_identifier(pattern, compiler, fake_id)
-            .stage
-            .constant_value
-            .expect("todo error handling!");
-        Pattern::Constant(value)
+        // let pattern = self.bind_node(pattern, type_, compiler)
+        crate::pattern::bind(pattern, type_, compiler, self)
     }
-}
-
-fn intern_namespaced_identifier(
-    namespaced_identifier: NamespacedIdentifier,
-    compiler: &mut Compiler,
-) -> (Vec<StringId>, StringId) {
-    let namespaces: Vec<_> = namespaced_identifier
-        .namespaces
-        .into_iter()
-        .map(|n| compiler.intern_location(n.0.location()))
-        .collect();
-    let identifier = compiler.intern_location(namespaced_identifier.identifier.location());
-    (namespaces, identifier)
 }

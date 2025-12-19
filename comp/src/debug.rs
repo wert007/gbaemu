@@ -1,6 +1,7 @@
 use crate::{
     BoundId, BoundTree, Compiler, HasLocation, StringInterner,
     bind::BoundBinaryOperator,
+    pattern::Pattern,
     syntax_tree::{Parsed, SyntaxNode, SyntaxNodeKind, SyntaxTree},
     typing::{TypeId, Types},
     variables::{VariableId, Variables},
@@ -192,8 +193,9 @@ fn dump_bound_tree_recursive(node: BoundId, compiler: &Compiler, indent: usize) 
             for arm in &match_expression.arms {
                 emit_indent(indent + 1);
                 match arm.pattern {
-                    crate::pattern::Pattern::Ignore => println!("_ => "),
-                    crate::pattern::Pattern::Constant(value) => println!("{value:?} => "),
+                    Pattern::Error => println!("#error => "),
+                    Pattern::Ignore => println!("_ => "),
+                    Pattern::Constant(value) => println!("{value:?} => "),
                 }
                 dump_bound_tree_recursive(arm.body, compiler, indent + 2);
             }

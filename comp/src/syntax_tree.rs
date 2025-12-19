@@ -41,7 +41,7 @@ impl Stage for Parsed {
     type Type = TypeIdentifier;
     type ChildNodeBoxed = Box<Self::ChildNode>;
     type ChildNode = SyntaxNode<Parsed>;
-    type Pattern = NamespacedIdentifier;
+    type Pattern = Self::ChildNode;
 }
 
 impl Stage for Bound {
@@ -868,7 +868,7 @@ pub struct MatchArmNode<S: Stage> {
 
 impl MatchArmNode<Parsed> {
     pub fn new(
-        pattern: NamespacedIdentifier,
+        pattern: SyntaxNode<Parsed>,
         fat_arrow: Token,
         body: SyntaxNode<Parsed>,
         comma: Option<Token>,
