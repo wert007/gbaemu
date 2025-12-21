@@ -2,6 +2,7 @@ use std::fmt::Display;
 
 use crate::{
     Location, SourceText, StringId, StringInterner,
+    bind::conversion::ConversionKind,
     typing::{TypeId, Types},
 };
 
@@ -62,6 +63,21 @@ where
     }
 }
 
+impl DiagnosticMessageComponent for ConversionKind {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+        _types: &Types,
+        _strings: &StringInterner,
+        _source_texts: &SourceText,
+    ) -> std::fmt::Result {
+        match self {
+            ConversionKind::Implicit => write!(f, "implicitly convert"),
+            ConversionKind::Instantiation => write!(f, "instantiate"),
+        }
+    }
+}
+
 pub struct BulletList<T>(pub(super) Location, pub(super) Vec<T>);
 
 impl<T: DiagnosticMessageComponent> DiagnosticMessageComponent for BulletList<T> {
@@ -72,7 +88,7 @@ impl<T: DiagnosticMessageComponent> DiagnosticMessageComponent for BulletList<T>
         strings: &StringInterner,
         source_texts: &SourceText,
     ) -> std::fmt::Result {
-        let length = self.0.to_string(types, strings, source_texts).len() + 1;
+        let length = self.0.to_string(source_texts).len() + 1;
         for entry in &self.1 {
             writeln!(f)?;
             for _ in 0..length {

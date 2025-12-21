@@ -34,8 +34,10 @@ const character = load_png_as_bytes_with_palette::<32, 32>("player.png").compres
 //
 // }
 
+trait Leakable {}
+
 #[intrinsic]
-pub fn forget<T>(t: &T) {}
+pub fn leak<T: Leakable>(t: &T) {}
 
 struct Sprite<width: u8, height: u8> {
     bytes: [u8; width * height / 2],

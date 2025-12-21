@@ -61,7 +61,13 @@ const r = BinaryResult::Success;
 const s = r.is_success();
 const t = match true {
     true => 1,
-    false => {
+    _ => {
         2
     },
 };
+
+fn id<T>(t: T): T {
+    t
+}
+
+const u = id(42);

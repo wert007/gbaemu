@@ -67,13 +67,19 @@ impl Variables {
         let active_scope = ScopeId(0);
         let global = Scope::global();
         variables.insert(active_scope, Vec::new());
-        let result = Self {
+        let mut result = Self {
             variables,
             all_scopes: vec![global],
             active_scope,
             next_variable_id: 0,
             current_namespaces: Vec::new(),
         };
+        result.register(
+            unsafe { Location::zero() },
+            StringId::POUND_ERROR,
+            TypeId::ERROR,
+            true,
+        );
         result
     }
 

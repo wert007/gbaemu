@@ -164,6 +164,7 @@ fn evaluate_conversion(
 ) -> Option<Value> {
     let base = evaluate_expression(conversion_node.base, compiler, evaluator)?;
     match (conversion_node.conversion_kind, base, target_type) {
+        (ConversionKind::Instantiation, _, _) => Some(base),
         (ConversionKind::Implicit, Value::UnsignedInteger32(v), TypeId::UNSIGNED_INTEGER_8) => {
             Some(Value::UnsignedInteger8(v as _))
         }
@@ -208,7 +209,7 @@ fn evaluate_field_access(
     let buf_u16 = u16::from_le_bytes(buffer.as_chunks::<2>().0[0]);
     let buf_u32 = u32::from_le_bytes(buffer);
     Some(match &compiler.types[type_] {
-        Type::IntegerLiteral(_) | Type::ArrayUnknownLength(_) => {
+        Type::IntegerLiteral(_) | Type::ArrayUnknownLength(_) | Type::GenericType(..) => {
             unreachable!("Should be resolved!")
         }
         Type::Error => Value::Error,
@@ -460,7 +461,7 @@ fn evaluate_binary(
                 (TypeId::UNSIGNED_INTEGER_8, TypeId::UNSIGNED_INTEGER_8) => {
                     Value::UnsignedInteger8(lhs.as_u8()?.wrapping_add(rhs.as_u8()?))
                 }
-                _ => todo!("Unexpected operand types!"),
+                _ => Value::Error,
             }
         }
         crate::bind::BoundBinaryOperator::Subtraction => {
@@ -477,7 +478,7 @@ fn evaluate_binary(
                 (TypeId::UNSIGNED_INTEGER_8, TypeId::UNSIGNED_INTEGER_8) => {
                     Value::UnsignedInteger8(lhs.as_u8()?.wrapping_sub(rhs.as_u8()?))
                 }
-                _ => todo!("Unexpected operand types!"),
+                _ => Value::Error,
             }
         }
         crate::bind::BoundBinaryOperator::Multiplication => {
@@ -494,7 +495,7 @@ fn evaluate_binary(
                 (TypeId::UNSIGNED_INTEGER_8, TypeId::UNSIGNED_INTEGER_8) => {
                     Value::UnsignedInteger8(lhs.as_u8()?.wrapping_mul(rhs.as_u8()?))
                 }
-                _ => todo!("Unexpected operand types!"),
+                _ => Value::Error,
             }
         }
         crate::bind::BoundBinaryOperator::Division => {
@@ -511,7 +512,7 @@ fn evaluate_binary(
                 (TypeId::UNSIGNED_INTEGER_8, TypeId::UNSIGNED_INTEGER_8) => {
                     Value::UnsignedInteger8(lhs.as_u8()?.wrapping_div(rhs.as_u8()?))
                 }
-                _ => todo!("Unexpected operand types!"),
+                _ => Value::Error,
             }
         }
         crate::bind::BoundBinaryOperator::Modulo => {
@@ -528,7 +529,7 @@ fn evaluate_binary(
                 (TypeId::UNSIGNED_INTEGER_8, TypeId::UNSIGNED_INTEGER_8) => {
                     Value::UnsignedInteger8(lhs.as_u8()?.wrapping_rem(rhs.as_u8()?))
                 }
-                _ => todo!("Unexpected operand types!"),
+                _ => Value::Error,
             }
         }
     })

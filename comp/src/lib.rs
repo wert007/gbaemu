@@ -126,6 +126,7 @@ pub struct StringId(usize);
 
 impl StringId {
     pub const UNDERSCORE: StringId = StringId(0);
+    pub const POUND_ERROR: StringId = StringId(1);
 }
 
 pub struct StringInterner {
@@ -137,6 +138,7 @@ impl StringInterner {
             strings: Vec::new(),
         };
         assert_eq!(result.intern("_"), StringId::UNDERSCORE);
+        assert_eq!(result.intern("#error"), StringId::POUND_ERROR);
 
         result
     }
@@ -238,6 +240,21 @@ impl Location {
             span: Span { start: 0, len: 0 },
             file: SourceTextId(0),
         }
+    }
+
+    fn to_string(self, source_texts: &SourceText) -> String {
+        use std::fmt::Write;
+        let mut buf = String::new();
+        write!(
+            buf,
+            "[{}:{}:{}]",
+            source_texts.file_name(self),
+            source_texts.line_number(self),
+            source_texts.column(self)
+        )
+        .unwrap();
+
+        buf
     }
 }
 

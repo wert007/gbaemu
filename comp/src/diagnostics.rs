@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use crate::{
     Location, SourceText, StringId, StringInterner,
-    bind::BoundBinaryOperator,
+    bind::{BoundBinaryOperator, conversion::ConversionKind},
     diagnostics::formatting::{BulletList, DiagnosticMessageComponent, Namespace, Parameter},
     lexer::TokenKind,
     typing::{TypeId, Types},
@@ -204,10 +204,15 @@ impl Diagnostic {
         }
     }
 
-    fn cannot_convert(location: Location, from: TypeId, to: TypeId) -> Diagnostic {
+    fn cannot_convert(
+        location: Location,
+        from: TypeId,
+        to: TypeId,
+        conversion_kind: ConversionKind,
+    ) -> Diagnostic {
         Self {
             location,
-            message: dgnst!("Cannot implicitly convert from ", from, " to ", to),
+            message: dgnst!("Cannot ", conversion_kind, " from ", from, " to ", to),
         }
     }
 
@@ -432,9 +437,19 @@ impl Diagnostics {
             ));
     }
 
-    pub fn report_cannot_convert(&mut self, location: Location, from: TypeId, to: TypeId) {
-        self.diagnostics
-            .push(Diagnostic::cannot_convert(location, from, to));
+    pub fn report_cannot_convert(
+        &mut self,
+        location: Location,
+        from: TypeId,
+        to: TypeId,
+        conversion_kind: ConversionKind,
+    ) {
+        self.diagnostics.push(Diagnostic::cannot_convert(
+            location,
+            from,
+            to,
+            conversion_kind,
+        ));
     }
 
     pub fn report_invalid_binary_operation(
@@ -507,5 +522,9 @@ impl Diagnostics {
                 location, type_, too_much,
             ));
         self.diagnostics.push(Diagnostic::definition_at(definition));
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.diagnostics.is_empty()
     }
 }

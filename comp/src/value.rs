@@ -11,6 +11,7 @@ pub enum Value {
     CompileTimeFunction(BoundId),
     DependentOn(BoundId),
     Type(TypeId),
+    Generic(TypeId),
 }
 impl Value {
     pub(crate) fn as_u32(&self) -> Option<u32> {
@@ -58,6 +59,9 @@ impl Value {
             Value::CompileTimeFunction(_) => 4,
             Value::DependentOn(_) => 0,
             Value::Type(_) => 0,
+            Value::Generic(_) => {
+                todo!("We know the size of its type, but we need types to access it!")
+            }
         }
     }
 

@@ -77,6 +77,9 @@ impl Binder {
     pub fn bind(mut self, compiler: &mut Compiler) -> BoundId {
         let tree = Parser::new(self.file).parse(compiler);
         crate::debug::dump_parse_tree(&tree, compiler);
+        if !compiler.diagnostics.is_empty() {
+            return BoundId(0);
+        }
         let node = self.bind_node(tree.node, TypeId::VOID, compiler);
         crate::debug::dump_bound_tree(node, &compiler);
         compiler.types.dump(&compiler.strings);
@@ -333,9 +336,12 @@ impl Binder {
         let node = if conversion_kind.convert(base_type, expected, &mut compiler.types) {
             SyntaxNode::<Bound>::conversion(location, base_id, expected, conversion_kind, id)
         } else {
-            compiler
-                .diagnostics
-                .report_cannot_convert(location, base_type, expected);
+            compiler.diagnostics.report_cannot_convert(
+                location,
+                base_type,
+                expected,
+                conversion_kind,
+            );
             SyntaxNode::<Bound>::error(location, id)
         };
         unsafe { compiler.nodes.set(id, node) };
@@ -687,13 +693,15 @@ impl Binder {
             .unwrap_or(TypeId::VOID);
 
         let body = self.bind_conversion(body, return_type, compiler, ConversionKind::Implicit);
-        let type_ = Type::FunctionType(FunctionType {
-            identifier,
-            parameters: parameters.iter().map(|p| p.identifier).collect(),
-            parameter_types: { parameters_bound.iter().map(|(.., t)| *t).collect() },
-            return_type,
-        });
-        let type_ = compiler.types.register(type_);
+        let type_ = compiler
+            .types
+            .register_function_type(
+                identifier,
+                parameters.iter().map(|p| p.identifier).collect(),
+                parameters_bound.iter().map(|(.., t)| *t).collect(),
+                return_type,
+            )
+            .id;
         compiler.variables.pop_namespace();
 
         let Some(identifier) =
@@ -843,13 +851,39 @@ impl Binder {
                 .report_invalid_function_type(base_location, type_);
             return SyntaxNode::<Bound>::error(location, id);
         };
-        let type_ = function_type.return_type;
+        let mut generic_types = HashMap::new();
         let arguments = function_call_node
             .arguments
             .into_iter()
             .zip(&function_type.parameter_types)
-            .map(|(a, t)| self.bind_node(a, *t, compiler))
+            .map(|(a, t)| {
+                let expected = if compiler.types.is_generic(*t) {
+                    generic_types.get(t).copied().unwrap_or(TypeId::UNKNOWN)
+                } else {
+                    *t
+                };
+                let argument = self.bind_node(a, expected, compiler);
+                if expected == TypeId::UNKNOWN {
+                    generic_types.insert(
+                        *t,
+                        compiler
+                            .types
+                            .make_concrete(compiler.nodes.type_of(argument)),
+                    );
+                }
+                argument
+            })
             .collect();
+        let function_type = compiler.types.instantiate(function_type, generic_types);
+        let type_ = function_type.return_type;
+
+        let base = self.bind_conversion(
+            base,
+            function_type.id,
+            compiler,
+            ConversionKind::Instantiation,
+        );
+
         SyntaxNode::<Bound>::function_call(location, base, arguments, type_, id)
     }
 
@@ -889,6 +923,13 @@ impl Binder {
         if is_out {
             assert!(type_.is_some());
             self.register_constant(identifier, Value::DependentOn(body));
+        } else {
+            if let Some(type_) = type_ {
+                self.register_constant(identifier, Value::Generic(type_));
+            } else {
+                let generic_type = compiler.types.create_generic_type(identifier.1);
+                self.register_constant(identifier, Value::Type(generic_type));
+            }
         }
         GenericParameterNode::<Bound>::new(is_out, identifier, type_, p.location)
     }
@@ -914,7 +955,6 @@ impl Binder {
         ) else {
             todo!("Error handling")
         };
-
         // let fields_bound = fields
         //     .iter()
         //     .map(|f| ParameterNode::<Bound>::new(f.0, f.1, f.2))
@@ -1124,16 +1164,23 @@ impl Binder {
         let (namespaces, identifier) =
             intern_namespaced_identifier(impl_block_node.identifier, compiler);
         // let identifier = compiler.intern_location(impl_block_node.identifier.location());
-        let struct_type = compiler
-            .variables
-            .find_by_name(&namespaces, identifier)
-            .unwrap()
-            .clone();
-        let type_ = self
-            .look_up_constant(struct_type.id)
-            .unwrap()
-            .as_type()
-            .unwrap();
+        let (type_, name) = match compiler.variables.find_by_name(&namespaces, identifier) {
+            Some(struct_type) => {
+                let type_ = self
+                    .look_up_constant(struct_type.id)
+                    .unwrap()
+                    .as_type()
+                    .unwrap();
+                (type_, struct_type.id)
+            }
+            None => {
+                let name = compiler
+                    .variables
+                    .find_by_name(&[], StringId::POUND_ERROR)
+                    .expect("Exists!");
+                (TypeId::ERROR, name.id)
+            }
+        };
         self.this_type = Some(type_);
         compiler.variables.push_namespace(identifier);
         let functions: Vec<BoundId> = impl_block_node
@@ -1142,7 +1189,7 @@ impl Binder {
             .map(|f| self.bind_node(f, TypeId::VOID, compiler))
             .collect();
         let struct_trait = Trait {
-            name: struct_type.id,
+            name,
             functions: functions
                 .iter()
                 .map(|id| {
@@ -1238,11 +1285,7 @@ impl Binder {
                 .map(|a| compiler.nodes.type_of(a.body))
                 .fold(TypeId::VOID, |acc, cur| {
                     if acc == TypeId::VOID {
-                        if compiler.types[cur].is_integer_literal() {
-                            TypeId::UNSIGNED_INTEGER_32
-                        } else {
-                            cur
-                        }
+                        compiler.types.make_concrete(cur)
                     } else if ConversionKind::Implicit.convert(acc, cur, &mut compiler.types) {
                         cur
                     } else if ConversionKind::Implicit.convert(cur, acc, &mut compiler.types) {

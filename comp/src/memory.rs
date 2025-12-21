@@ -43,7 +43,10 @@ impl<S: Stage> Memoryblock<S> {
 
     pub(crate) fn write_value(&mut self, ptr: usize, value: crate::value::Value) {
         match value {
-            crate::value::Value::Error => {}
+            crate::value::Value::Error
+            | crate::value::Value::DependentOn(_)
+            | crate::value::Value::Type(_)
+            | crate::value::Value::Generic(_) => {}
             crate::value::Value::UnsignedInteger8(it) => self.buffer[ptr] = it,
             crate::value::Value::UnsignedInteger16(it) => {
                 for (offset, byte) in it.to_le_bytes().into_iter().enumerate() {
@@ -66,8 +69,6 @@ impl<S: Stage> Memoryblock<S> {
                     self.buffer[ptr + offset] = byte;
                 }
             }
-            crate::value::Value::DependentOn(_) => {}
-            crate::value::Value::Type(_) => {}
         }
     }
 
