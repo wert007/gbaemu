@@ -5,9 +5,10 @@ use crate::{
     lexer::{Lexer, Token, TokenKind},
     syntax_tree::{
         ArrayTypeIdentifier, EnumVariantNode, FieldInitilizationNode, FunctionHeaderNode,
-        GenericParameterHeaderNode, GenericParameterNode, MatchArmNode, NamedTypeIdentifier,
-        NamespacedIdentifier, ParameterNode, Parsed, SyntaxNode, SyntaxTree, ThisTypeIdentifier,
-        TypeIdentifier,
+        GenericArgumentHeaderNode, GenericArgumentNode, GenericParameterHeaderNode,
+        GenericParameterNode, MatchArmNode, NamedTypeIdentifier, NamespacedIdentifier,
+        ParameterNode, Parsed, SyntaxNode, SyntaxTree, ThisTypeIdentifier, TypeIdentifier,
+        TypeOrExpression,
     },
 };
 
@@ -230,7 +231,13 @@ impl Parser {
                 NamespacedIdentifier::without_namespace(self.consume(compiler)),
             ),
             TokenKind::Identifier => self.parse_variable_or_struct_literal(compiler),
-            TokenKind::LBracket => self.parse_array_literal(compiler),
+            TokenKind::LBracket => {
+                if self.look_for_balanced(TokenKind::RBracket, TokenKind::Semicolon, compiler) {
+                    SyntaxNode::<Parsed>::type_expression(self.parse_type_identifier(compiler))
+                } else {
+                    self.parse_array_literal(compiler)
+                }
+            }
             _ => self.parse_literal(compiler),
         }
     }
@@ -273,6 +280,20 @@ impl Parser {
         let comp_keyword = self.maybe_expect(TokenKind::CompKeyword, compiler);
         let struct_keyword = self.expect(TokenKind::StructKeyword, compiler);
         let identifier = self.expect(TokenKind::Identifier, compiler);
+        let generics = if self.peek(0, compiler) == TokenKind::LessThan {
+            let less_than = self.expect(TokenKind::LessThan, compiler);
+            let parameters = self.parse_until(TokenKind::GreaterThan, compiler, |p, c| {
+                p.parse_generic_parameter(c)
+            });
+            let greater_than = self.expect(TokenKind::GreaterThan, compiler);
+            Some(GenericParameterHeaderNode::<Parsed>::new(
+                less_than,
+                parameters,
+                greater_than,
+            ))
+        } else {
+            None
+        };
         let lbrace = self.expect(TokenKind::LBrace, compiler);
         let fields = self.parse_until(TokenKind::RBrace, compiler, |p, c| p.parse_parameter(c));
         if !fields.is_empty()
@@ -291,6 +312,7 @@ impl Parser {
             comp_keyword,
             struct_keyword,
             identifier,
+            generics,
             lbrace,
             fields,
             rbrace,
@@ -405,6 +427,30 @@ impl Parser {
         match self.peek(0, compiler) {
             TokenKind::Identifier => {
                 let identifier = self.parse_namespaced_identifier(compiler);
+                let generics = if self.peek(0, compiler) == TokenKind::LessThan {
+                    let less_than = self.expect(TokenKind::LessThan, compiler);
+                    let arguments = self.parse_until(TokenKind::GreaterThan, compiler, |p, c| {
+                        let argument = p.parse_expression(c);
+                        let comma = p.maybe_expect(TokenKind::Comma, c);
+                        SyntaxNode::<Parsed>::commaed_expression(argument, comma)
+                    });
+                    if let Some(missing) = arguments[..arguments.len() - 1]
+                        .iter()
+                        .position(|a| !a.kind.ends_with_comma())
+                    {
+                        compiler
+                            .diagnostics
+                            .report_missing_comma(arguments[missing].location());
+                    }
+                    let greater_than = self.expect(TokenKind::GreaterThan, compiler);
+                    Some(GenericArgumentHeaderNode::<Parsed>::new(
+                        less_than,
+                        arguments,
+                        greater_than,
+                    ))
+                } else {
+                    None
+                };
                 TypeIdentifier::Named(NamedTypeIdentifier {
                     ampersand,
                     identifier,
@@ -561,13 +607,27 @@ impl Parser {
 
     fn parse_impl_block(&mut self, compiler: &mut Compiler) -> SyntaxNode<Parsed> {
         let impl_keyword = self.expect(TokenKind::ImplKeyword, compiler);
-        let identifier = self.parse_namespaced_identifier(compiler);
+        let generics = if self.peek(0, compiler) == TokenKind::LessThan {
+            let less_than = self.expect(TokenKind::LessThan, compiler);
+            let parameters = self.parse_until(TokenKind::GreaterThan, compiler, |p, c| {
+                p.parse_generic_parameter(c)
+            });
+            let greater_than = self.expect(TokenKind::GreaterThan, compiler);
+            Some(GenericParameterHeaderNode::<Parsed>::new(
+                less_than,
+                parameters,
+                greater_than,
+            ))
+        } else {
+            None
+        };
+        let identifier = self.parse_type_identifier(compiler);
         let lbrace = self.expect(TokenKind::LBrace, compiler);
         let body = self.parse_until(TokenKind::RBrace, compiler, |p, c| {
             p.parse_function_declaration(c)
         });
         let rbrace = self.expect(TokenKind::RBrace, compiler);
-        SyntaxNode::<Parsed>::impl_block(impl_keyword, identifier, lbrace, body, rbrace)
+        SyntaxNode::<Parsed>::impl_block(impl_keyword, identifier, generics, lbrace, body, rbrace)
     }
 
     fn parse_enum_variant(&mut self, compiler: &mut Compiler) -> EnumVariantNode<Parsed> {
@@ -605,5 +665,30 @@ impl Parser {
 
     fn parse_pattern(&mut self, compiler: &mut Compiler) -> SyntaxNode<Parsed> {
         self.parse_expression(compiler)
+    }
+
+    fn look_for_balanced(
+        &mut self,
+        inside: TokenKind,
+        needle: TokenKind,
+        compiler: &mut Compiler,
+    ) -> bool {
+        let mut index = 0;
+        let mut depth = 0;
+        loop {
+            let cur = self.peek(index, compiler);
+            index += 1;
+            if cur == needle {
+                return true;
+            }
+            if Some(cur) == inside.partner() {
+                depth += 1;
+            } else if cur == inside {
+                depth -= 1;
+            }
+            if depth == 0 {
+                return false;
+            }
+        }
     }
 }

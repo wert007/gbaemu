@@ -200,6 +200,13 @@ fn dump_bound_tree_recursive(node: BoundId, compiler: &Compiler, indent: usize) 
                 dump_bound_tree_recursive(arm.body, compiler, indent + 2);
             }
         }
+        SyntaxNodeKind::TypeExpression(type_id) => {
+            println!(
+                "Type [id={}] {}",
+                type_id.as_raw(),
+                compiler.types.to_string(*type_id, &compiler.strings)
+            );
+        }
     }
 }
 
@@ -232,6 +239,9 @@ fn dump_parse_node(node: &SyntaxNode<Parsed>, compiler: &mut Compiler, indent: u
         }
         SyntaxNodeKind::Literal(token) => {
             println!("Lit {}", &compiler[token.location()]);
+        }
+        SyntaxNodeKind::TypeExpression(type_identifier) => {
+            println!("Type {}", &compiler[type_identifier.location()]);
         }
         SyntaxNodeKind::Identifier(token) => {
             println!("Var {}", &compiler[token.location()]);
@@ -310,6 +320,24 @@ fn dump_parse_node(node: &SyntaxNode<Parsed>, compiler: &mut Compiler, indent: u
                 "Struct {}",
                 &compiler[struct_declaration_node.identifier.location()]
             );
+            if let Some(generics) = &struct_declaration_node.generics {
+                emit_indent(indent);
+                println!("Generics");
+                for p in &generics.parameters {
+                    emit_indent(indent + 1);
+                    if p.out.is_some() {
+                        print!("out ");
+                    }
+                    print!("{}", &compiler[p.identifier.location()]);
+                    if let Some((_, t)) = &p.type_ {
+                        println!(": {}", &compiler[t.location()])
+                    } else {
+                        println!();
+                    }
+                }
+                emit_indent(indent);
+                println!("Fields");
+            }
             for field in &struct_declaration_node.fields {
                 emit_indent(indent + 1);
                 println!(

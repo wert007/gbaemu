@@ -103,6 +103,13 @@ impl Binder {
             SyntaxNodeKind::ConstDeclaration(const_declaration_node) => self
                 .bind_const_declaration(const_declaration_node, expected, location, compiler, id),
             SyntaxNodeKind::Literal(token) => self.bind_literal(token, expected, compiler, id),
+            SyntaxNodeKind::TypeExpression(type_identifier) => {
+                SyntaxNode::<Bound>::type_expression(
+                    location,
+                    self.bind_type_identifier(type_identifier, compiler, false),
+                    id,
+                )
+            }
             SyntaxNodeKind::Binary(binary_node) => {
                 self.bind_binary(location, binary_node, expected, compiler, id)
             }
@@ -1161,35 +1168,48 @@ impl Binder {
         id: BoundId,
     ) -> SyntaxNode<Bound> {
         // let namespaces =
-        let (namespaces, identifier) =
-            intern_namespaced_identifier(impl_block_node.identifier, compiler);
-        // let identifier = compiler.intern_location(impl_block_node.identifier.location());
-        let (type_, name) = match compiler.variables.find_by_name(&namespaces, identifier) {
-            Some(struct_type) => {
-                let type_ = self
-                    .look_up_constant(struct_type.id)
-                    .unwrap()
-                    .as_type()
-                    .unwrap();
-                (type_, struct_type.id)
-            }
-            None => {
-                let name = compiler
-                    .variables
-                    .find_by_name(&[], StringId::POUND_ERROR)
-                    .expect("Exists!");
-                (TypeId::ERROR, name.id)
-            }
-        };
+        let type_ = self.bind_type_identifier(impl_block_node.identifier, compiler, false);
+        let name = compiler
+            .types
+            .name_of(type_, &mut compiler.strings)
+            .unwrap_or(StringId::POUND_ERROR);
+        // let (type_, name) = match compiler.variables.find_by_name(&namespaces, identifier) {
+        //     Some(struct_type) => {
+        //         let type_ = self
+        //             .look_up_constant(struct_type.id)
+        //             .unwrap()
+        //             .as_type()
+        //             .unwrap();
+        //         (type_, struct_type.id)
+        //     }
+        //     None => {
+        //         let name = compiler
+        //             .variables
+        //             .find_by_name(&[], StringId::POUND_ERROR)
+        //             .expect("Exists!");
+        //         (TypeId::ERROR, name.id)
+        //     }
+        // };
         self.this_type = Some(type_);
-        compiler.variables.push_namespace(identifier);
+        let identifier = match compiler
+            .variables
+            .find_by_name(&compiler.variables.current_namespaces, name)
+        {
+            Some(it) => it,
+            None => compiler
+                .variables
+                .find_by_name(&[], StringId::POUND_ERROR)
+                .expect("Exists!"),
+        }
+        .id;
+        compiler.variables.push_namespace(name);
         let functions: Vec<BoundId> = impl_block_node
             .body
             .into_iter()
             .map(|f| self.bind_node(f, TypeId::VOID, compiler))
             .collect();
         let struct_trait = Trait {
-            name,
+            name: identifier,
             functions: functions
                 .iter()
                 .map(|id| {

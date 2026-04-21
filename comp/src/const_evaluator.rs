@@ -83,6 +83,7 @@ fn evaluate_expression(
         SyntaxNodeKind::ConstDeclaration(_) => None,
         SyntaxNodeKind::ImplBlock(_) => None,
         SyntaxNodeKind::Literal(_) => unreachable!(),
+        SyntaxNodeKind::TypeExpression(_) => unreachable!(),
         SyntaxNodeKind::CommaedExpression((expression, _)) => {
             evaluate_expression(expression, compiler, evaluator)
         }

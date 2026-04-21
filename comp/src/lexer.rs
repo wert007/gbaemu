@@ -185,6 +185,20 @@ impl TokenKind {
             TokenKind::FatArrow => "=>",
         }
     }
+
+    pub(crate) fn partner(self) -> Option<TokenKind> {
+        Some(match self {
+            TokenKind::LBrace => TokenKind::RBrace,
+            TokenKind::RBrace => TokenKind::LBrace,
+            TokenKind::LParen => TokenKind::RParen,
+            TokenKind::RParen => TokenKind::LParen,
+            TokenKind::LBracket => TokenKind::RBracket,
+            TokenKind::RBracket => TokenKind::LBracket,
+            TokenKind::LessThan => TokenKind::GreaterThan,
+            TokenKind::GreaterThan => TokenKind::LessThan,
+            _ => return None,
+        })
+    }
 }
 
 pub struct Lexer {

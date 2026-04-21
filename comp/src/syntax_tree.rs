@@ -30,6 +30,7 @@ pub trait Stage: Debug + Clone {
     type Type: Debug + Clone;
     type ChildNodeBoxed: Debug + Clone;
     type ChildNode: Debug + Clone;
+    type Value: Debug + Clone;
     type Pattern: Debug + Clone;
 }
 
@@ -41,6 +42,7 @@ impl Stage for Parsed {
     type Type = TypeIdentifier;
     type ChildNodeBoxed = Box<Self::ChildNode>;
     type ChildNode = SyntaxNode<Parsed>;
+    type Value = SyntaxNode<Parsed>;
     type Pattern = Self::ChildNode;
 }
 
@@ -52,7 +54,13 @@ impl Stage for Bound {
     type Type = TypeId;
     type ChildNode = BoundId;
     type ChildNodeBoxed = BoundId;
+    type Value = Value;
     type Pattern = crate::pattern::Pattern;
+}
+
+pub enum TypeOrExpression {
+    Type(TypeIdentifier),
+    Expression(SyntaxNode<Parsed>),
 }
 
 #[derive(Debug, Clone)]
@@ -490,6 +498,22 @@ impl SyntaxNode<Bound> {
             }),
         }
     }
+
+    pub(crate) fn type_expression(
+        location: Location,
+        type_: TypeId,
+        id: BoundId,
+    ) -> SyntaxNode<Bound> {
+        Self {
+            location,
+            stage: Bound {
+                id,
+                type_: TypeId::TYPE,
+                constant_value: Some(Value::Type(type_)),
+            },
+            kind: SyntaxNodeKind::TypeExpression(type_),
+        }
+    }
 }
 
 fn to_option(value: bool) -> Option<()> {
@@ -568,6 +592,7 @@ impl SyntaxNode<Parsed> {
         comp_keyword: Option<Token>,
         struct_keyword: Token,
         identifier: Token,
+        generics: Option<GenericParameterHeaderNode<Parsed>>,
         lbrace: Token,
         fields: Vec<ParameterNode<Parsed>>,
         rbrace: Token,
@@ -582,6 +607,7 @@ impl SyntaxNode<Parsed> {
                 comp_keyword,
                 struct_keyword,
                 identifier: NamespacedIdentifier::without_namespace(identifier),
+                generics,
                 lbrace,
                 fields,
                 rbrace,
@@ -613,7 +639,8 @@ impl SyntaxNode<Parsed> {
 
     pub(crate) fn impl_block(
         impl_keyword: Token,
-        identifier: NamespacedIdentifier,
+        identifier: TypeIdentifier,
+        generics: Option<GenericParameterHeaderNode<Parsed>>,
         lbrace: Token,
         body: Vec<SyntaxNode<Parsed>>,
         rbrace: Token,
@@ -625,6 +652,7 @@ impl SyntaxNode<Parsed> {
             kind: SyntaxNodeKind::ImplBlock(ImplBlockNode {
                 impl_keyword,
                 identifier,
+                generics,
                 lbrace,
                 body,
                 rbrace,
@@ -718,6 +746,14 @@ impl SyntaxNode<Parsed> {
         Self {
             location: variable.location(),
             kind: SyntaxNodeKind::Identifier(variable),
+            stage: Parsed,
+        }
+    }
+
+    pub(crate) fn type_expression(type_identifier: TypeIdentifier) -> SyntaxNode<Parsed> {
+        Self {
+            location: type_identifier.location(),
+            kind: SyntaxNodeKind::TypeExpression(type_identifier),
             stage: Parsed,
         }
     }
@@ -847,6 +883,7 @@ pub enum SyntaxNodeKind<S: Stage> {
     PartialCapture(PartialCaptureNode<S>),
     EnumDeclaration(EnumDeclarationNode<S>),
     MatchExpression(MatchExpressionNode<S>),
+    TypeExpression(S::Type),
 }
 
 #[derive(Debug, Clone)]
@@ -981,7 +1018,8 @@ pub struct FunctionDeclarationNode<S: Stage> {
 #[derive(Debug, Clone)]
 pub struct ImplBlockNode<S: Stage> {
     impl_keyword: S::Token,
-    pub identifier: S::Identifier,
+    pub identifier: S::Type,
+    pub generics: Option<GenericParameterHeaderNode<S>>,
     lbrace: S::Token,
     pub body: Vec<S::ChildNode>,
     rbrace: S::Token,
@@ -992,6 +1030,7 @@ pub struct StructDeclarationNode<S: Stage> {
     pub comp_keyword: Option<S::Token>,
     struct_keyword: S::Token,
     pub identifier: S::Identifier,
+    pub generics: Option<GenericParameterHeaderNode<S>>,
     lbrace: S::Token,
     pub fields: Vec<ParameterNode<S>>,
     rbrace: S::Token,
@@ -1092,6 +1131,71 @@ impl GenericParameterHeaderNode<Parsed> {
 impl<S: Stage> HasLocation for GenericParameterHeaderNode<S> {
     fn location(&self) -> Location {
         self.location
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct GenericArgumentHeaderNode<S: Stage> {
+    pub location: Location,
+    pub less_than: S::Token,
+    pub arguments: Vec<S::Value>,
+    pub greater_than: S::Token,
+}
+
+impl GenericArgumentHeaderNode<Bound> {
+    pub fn new(location: Location, arguments: Vec<Value>) -> Self {
+        Self {
+            location,
+            less_than: (),
+            arguments,
+            greater_than: (),
+        }
+    }
+}
+
+impl GenericArgumentHeaderNode<Parsed> {
+    pub(crate) fn new(
+        less_than: Token,
+        arguments: Vec<SyntaxNode<Parsed>>,
+        greater_than: Token,
+    ) -> Self {
+        let location = less_than.location().combine(greater_than.location());
+        Self {
+            location,
+            less_than,
+            arguments,
+            greater_than,
+        }
+    }
+}
+
+impl<S: Stage> HasLocation for GenericArgumentHeaderNode<S> {
+    fn location(&self) -> Location {
+        self.location
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum GenericArgumentNode<S: Stage> {
+    Expression(S::ChildNodeBoxed),
+    Type(S::Type, Option<S::Token>),
+}
+
+impl GenericArgumentNode<Parsed> {
+    pub fn ends_with_comma(&self) -> bool {
+        match self {
+            GenericArgumentNode::Expression(e) => e.kind.ends_with_comma(),
+            GenericArgumentNode::Type(_, c) => c.is_some(),
+        }
+    }
+}
+
+impl HasLocation for GenericArgumentNode<Parsed> {
+    fn location(&self) -> Location {
+        match self {
+            GenericArgumentNode::Expression(e) => e.location(),
+            GenericArgumentNode::Type(t, c) => t.location().combine(c.map(|c| c.location())),
+        }
     }
 }
 

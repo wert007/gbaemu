@@ -49,6 +49,7 @@ pub(crate) fn bind(
         SyntaxNodeKind::FunctionCall(function_call_node) => todo!(),
         SyntaxNodeKind::StructLiteral(struct_literal_node) => todo!(),
         SyntaxNodeKind::PartialCapture(partial_capture_node) => todo!(),
+        SyntaxNodeKind::TypeExpression(type_identifier) => todo!(),
     }
 }
 

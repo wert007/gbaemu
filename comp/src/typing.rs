@@ -22,6 +22,10 @@ impl TypeId {
     pub(crate) unsafe fn from_raw(t: usize) -> TypeId {
         Self(t)
     }
+
+    pub fn as_raw(self) -> usize {
+        self.0
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -466,6 +470,35 @@ impl Types {
                 .iter()
                 .all(|(.., t)| self.is_concrete(*t)),
             Type::Enum(_enum_type) => true,
+        }
+    }
+
+    pub(crate) fn name_of(&self, id: TypeId, strings: &mut StringInterner) -> Option<StringId> {
+        if let Some(name) = self.names.get(&id) {
+            return Some(*name);
+        }
+        match &self[id] {
+            Type::Type | Type::Unknown | Type::Error => None,
+            Type::Void => unreachable!(),
+            Type::Pointer => unreachable!(),
+            Type::UnsignedInteger8 => unreachable!(),
+            Type::UnsignedInteger16 => unreachable!(),
+            Type::UnsignedInteger32 => unreachable!(),
+            Type::IntegerLiteral(_) => unreachable!(),
+            Type::Bool => unreachable!(),
+            Type::ArrayUnknownLength(type_id) => unreachable!(),
+            Type::GenericType(generic_type) => Some(generic_type.name),
+            Type::Array(type_id, len) => {
+                let name = self.name_of(*type_id, strings)?;
+                Some(strings.intern(format!("Array<{}, {len}>", &strings[name])))
+            }
+            Type::FunctionType(function_type) => todo!(),
+            Type::Struct(struct_type) => todo!(),
+            Type::Reference(type_id) => {
+                let name = self.name_of(id, strings)?;
+                Some(strings.intern(format!("&{}", &strings[name])))
+            }
+            Type::Enum(enum_type) => todo!(),
         }
     }
 }
