@@ -12,6 +12,7 @@ pub struct SerialCommunication {
     bus_receive_data: u32,
     bus_transmit_data: u32,
     bus_receive_status: u16,
+    just_finished_transmission: bool,
 }
 
 impl Default for SerialCommunication {
@@ -25,6 +26,7 @@ impl Default for SerialCommunication {
             bus_receive_data: Default::default(),
             bus_transmit_data: Default::default(),
             bus_receive_status: Default::default(),
+            just_finished_transmission: Default::default(),
         }
     }
 }
@@ -46,6 +48,15 @@ impl SerialCommunication {
             let index = relative_address / 2;
             let byte_index = relative_address % 2;
             write_byte_to_half_word(&mut self.data[index], byte_index, byte);
+        }
+    }
+
+    pub fn run_cycle(&mut self, tick: usize) -> Vec<Interrupt> {
+        if self.just_finished_transmission {
+            self.just_finished_transmission = false;
+            vec![Interrupt::SerialCom]
+        } else {
+            Vec::new()
         }
     }
 }
@@ -111,9 +122,14 @@ impl MemoryPlugin for SerialCommunication {
             0x120..0x128 => self.write_data(relative_address - 0x120, byte),
             0x128..0x12a => {
                 write_byte_to_half_word(&mut self.control_register, relative_address - 0x128, byte);
-                if self.control_register & 0x40 > 0 {
-                    todo!("IRQ expected??")
+                self.just_finished_transmission =
+                    self.control_register & 0x80 > 0 || self.control_register & 0x4000 > 0;
+                if (self.control_register & 0x3000) == 0x2000 {
+                    self.control_register |= 0x8;
                 }
+                // TODO: Automatically mark things as done here, even though we
+                // do nothing right now...
+                // self.control_register &= !0x80;
             }
             0x12a..0x12c => self.write_data(relative_address - 0x120, byte),
             0x12c..0x130 => {}

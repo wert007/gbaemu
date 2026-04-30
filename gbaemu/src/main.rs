@@ -1,8 +1,9 @@
 use clap::Parser;
 use gbaemu_core::{
+    interrupts::Interrupt,
     io_registers::GbaIo,
     lcd::PixelFormat,
-    plugins::debugger::Debugger,
+    plugins::{debugger::Debugger, function_watcher::FunctionWatcher},
     registers::{RegisterIndex, RegisterList, Registers},
     Cartridge, Gba, GbaArgs,
 };
@@ -85,8 +86,55 @@ fn main() {
     };
     let mut gba = Gba::new(game).with_args(args.clone());
     let mut debugger = Debugger::new(args.silent);
-    debugger
-    // .with_breakpoint(0xab0)
+    _ = debugger
+    .skip_function("abs")
+    .skip_function("swi_VBlankIntrWait")
+    .skip_function("swi_IntrWait")
+    .skip_function("change_wanted_flags")
+    .skip_function("load_some_color_palettes")
+    .skip_function("swi_Div_t")
+    .skip_function("swi_CPUFastSet")
+    .skip_function("swi_SoundBiasChange")
+    .skip_function("safecopy32")
+    .skip_function("swi_HuffUnComp")
+    .skip_function("swi_LZ77UnCompWRAM")
+    .skip_function("swi_BitUnPack")
+    .skip_function("CheckDestInWriteableRange")
+    .skip_function("swi_CPUSet")
+    .skip_function("copy_data_into_gameboy_logo_buffer")
+    .skip_function("LoadLogoIntoGlobalLogoBuffer_wert007")
+    .skip_function("loadLogoBlock_wert007")
+    .skip_function("simple_hash_wert007")
+    .skip_function("swi_RegisterRamReset")
+    .skip_function("reset_register_wert007")
+    .skip_function("swi_HardReset")
+    .skip_function("InitSystemStack")
+    .skip_function("jumptable")
+    .skip_function("some_parabolic_formulas_maybe_to_make_logos_jump_wert007")
+    .skip_function("sub_2D68")
+    .skip_function("enable_all_interrupts")
+    .skip_function("disable_all_interrupts")
+    .skip_function("swi_Diff16bitUnFilter")
+    .skip_function("loadGameboyLogoBuffer2IntoVRAM")
+    .skip_function("fill2dGradient_wert007")
+    .skip_function("copy_color_palette")
+    .skip_function("copy_oam_data")
+    .skip_function("swi_ObjAffineSet")
+    .skip_function("swi_Div")
+    .skip_function("swi_DivArm")
+    .skip_function("swi_BiosChecksum")
+    .skip_function("bios_irq_handler")
+    .skip_function("irq_complete")
+    .skip_function("irq_vector")
+    // .emit_register_on(RegisterIndex::R1, 0x330)
+    // .emit_register_on(RegisterIndex::R2, 0x378)
+    // .emit_register_on(RegisterIndex::R1, 0x378)
+    // .emit_register_on(RegisterIndex::R1, 0x34c)
+    // .emit_register_on(RegisterIndex::Lr, 0x328)
+    // .emit_register_on(RegisterIndex::R2, 0x364)
+    // debugger
+    // .with_breakpoint(0x1c40 )
+    // .with_breakpoint(0x128)
     // .with_breakpoint(0xaac)
     // .with_breakpoint(0x440)
     // .with_breakpoint_conditionally(0xbc8, |r: Registers| r.read(RegisterIndex::R1) == 0x6016c00)
@@ -98,17 +146,23 @@ fn main() {
     // .with_breakpoint(0x19b2)
     // .with_breakpoint(0x2b6a)
     // .with_breakpoint(0x2c4c)
+    // .with_breakpoint(0x2d70)
     // .with_breakpoint(0x330)
+    // .with_breakpoint(0x300)
+    // .with_breakpoint(0x344)
     // // .with_breakpoint(0xb96)
-    // .with_watch_memory_address(0x3007FF8, 2)
+    // .break_on_irq(Interrupt::SerialCom)
+    .with_watch_memory_address(0x04000128, 2, false, false, false)
+    .with_watch_memory_address(0x04000134, 2, false, false, false)
     // .with_watch_memory_address(0x3fffFF8, 2)
-    .with_watch_stack()
+    // .with_watch_memory_address(0x300001a, 1, false, true)
+    // .with_watch_stack()
     // .with_watch_memory_address(0x60024e0, 0x20)
     // .with_watch_memory_address(0x6002440, 0x80000)
 
     // This means we need to support V-CounterFlag (is there an Interrupt as well?)
     // .with_watch_memory_address(0x06010000 + 8 * 8 * 434, 8 * 8)
-    .with_watch_memory_address(0x06010000 + 2176, 1)
+    // .with_watch_memory_address(0x06010000 + 2176, 1)
     // .with_watch_memory_address(0x4000134, 2)
     // .with_watch_memory_address(0x400012a, 2)
     // .with_watch_memory_address(0x4000120, 8)

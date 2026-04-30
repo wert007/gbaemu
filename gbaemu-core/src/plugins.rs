@@ -7,6 +7,7 @@ pub mod debugger;
 use crate::{
     GbaArgs,
     instructions::Instruction,
+    interrupts::Interrupt,
     memory::Memory,
     registers::{Mode, Registers},
 };
@@ -31,6 +32,9 @@ impl PluginWishes {
 
 pub trait Plugin: Send {
     fn with_args(&mut self, args: GbaArgs);
+    fn interrupt_occured(&mut self, interrupt: Interrupt) -> Option<PluginWishes> {
+        None
+    }
     fn should_execute(
         &mut self,
         _registers: &Registers,

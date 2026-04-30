@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use crate::{
     GbaArgs,
     instructions::{Instruction, display::DisplayContext},
+    interrupts::Interrupt,
     memory::Memory,
     plugins::{Plugin, PluginWishes, debug_symbols::DebugSymbols},
     registers::{Mode, RegisterIndex, RegisterList, Registers},
@@ -11,6 +12,7 @@ use crate::{
 pub struct Breakpoint {
     pub ip: u32,
     condition: Option<Box<dyn Fn(Registers) -> bool + Send>>,
+    action: Option<Box<dyn Fn(Registers) + Send>>,
     /// Breakpoint will cease to exist, once it been hit.
     fragile: bool,
 }
@@ -21,17 +23,31 @@ impl Breakpoint {
             None => true,
         }
     }
+
+    fn action(&self, registers: Registers) -> bool {
+        if let Some(a) = &self.action {
+            a(registers);
+            false
+        } else {
+            true
+        }
+    }
 }
 
 pub struct MemoryAddressWatcher {
     pub address: u32,
     pub last_seen_value: u8,
+    pub print_on_read: bool,
+    pub step_on_read: bool,
+    pub step_on_write: bool,
 }
 
 pub struct Debugger {
     log_file: Option<PathBuf>,
     breakpoints: Vec<Breakpoint>,
+    break_on_irq: Vec<Interrupt>,
     memory_address_watchers: Vec<MemoryAddressWatcher>,
+    skipped_sections: Vec<(u32, u32)>,
     is_silent: bool,
     is_stepping: bool,
     watch_stack: bool,
@@ -54,6 +70,8 @@ impl Debugger {
             stackframe: Vec::new(),
             debug_symbols: vec![debug_symbols_bios],
             registers: Registers::new(),
+            skipped_sections: Vec::new(),
+            break_on_irq: Vec::new(),
         }
     }
 
@@ -74,6 +92,7 @@ impl Debugger {
         self.breakpoints.push(Breakpoint {
             ip,
             condition: None,
+            action: None,
             fragile: false,
         });
         self
@@ -87,16 +106,27 @@ impl Debugger {
         self.breakpoints.push(Breakpoint {
             ip,
             condition: Some(Box::new(c)),
+            action: None,
             fragile: false,
         });
         self
     }
 
-    pub fn with_watch_memory_address(&mut self, address: u32, length_in_bytes: u32) -> &mut Self {
+    pub fn with_watch_memory_address(
+        &mut self,
+        address: u32,
+        length_in_bytes: u32,
+        step_on_write: bool,
+        step_on_read: bool,
+        print_on_read: bool,
+    ) -> &mut Self {
         for i in 0..length_in_bytes {
             self.memory_address_watchers.push(MemoryAddressWatcher {
                 address: address + i,
                 last_seen_value: 0,
+                step_on_read,
+                step_on_write,
+                print_on_read,
             });
         }
         self
@@ -179,6 +209,52 @@ impl Debugger {
             write!(file, "{msg}").expect("Coult not write to logfile!");
         }
     }
+
+    pub fn emit_register_on(&mut self, register: RegisterIndex, address: u32) -> &mut Self {
+        self.breakpoints.push(Breakpoint {
+            ip: address,
+            condition: None,
+            action: Some(Box::new(move |r| {
+                println!("[{address:04x}] {register} = {}", r.read(register));
+            })),
+            fragile: false,
+        });
+        self
+    }
+
+    pub fn skip_function(&mut self, name: &str) -> &mut Self {
+        if let Some(f) = self.debug_symbols.iter().find_map(|s| {
+            s.functions
+                .iter()
+                .find(|f| f.name.as_ref().map(String::as_str) == Some(name))
+        }) {
+            self.skip_section(f.start, f.end);
+        } else {
+            panic!("Function {name} not found???");
+        }
+        self
+    }
+
+    pub fn skip_section(&mut self, start: u32, end: u32) -> &mut Self {
+        self.skipped_sections.push((start, end));
+        self
+    }
+
+    fn is_skipped(&self, ip: u32) -> bool {
+        self.skipped_sections
+            .iter()
+            .copied()
+            .any(|(s, e)| s <= ip && ip < e)
+    }
+
+    fn is_silent(&self, ip: u32) -> bool {
+        self.is_silent || self.is_skipped(ip)
+    }
+
+    pub fn break_on_irq(&mut self, irq: crate::interrupts::Interrupt) -> &mut Self {
+        self.break_on_irq.push(irq);
+        self
+    }
 }
 
 impl Plugin for Debugger {
@@ -186,6 +262,21 @@ impl Plugin for Debugger {
         if let Some(log_file) = args.log_file.clone() {
             self.log_file = Some(log_file);
         }
+    }
+
+    fn interrupt_occured(&mut self, interrupt: Interrupt) -> Option<PluginWishes> {
+        let p = self
+            .break_on_irq
+            .iter()
+            .find(|i| **i == interrupt)
+            .map(|i| PluginWishes {
+                pause_execution: true,
+                ..Default::default()
+            })?;
+        if p.pause_execution() {
+            self.is_stepping = true;
+        }
+        Some(p)
     }
 
     fn after_executing(
@@ -199,7 +290,7 @@ impl Plugin for Debugger {
         self.watch_stack_changes_afterwards(registers, instruction, ip);
 
         let mut messages: Vec<String> = Vec::new();
-        let should_print_instruction = !self.is_stepping;
+        let should_print_instruction = !self.is_stepping && !self.is_skipped(ip);
         while let Some((addr, val)) = memory.memory_watcher.reads.pop_front() {
             match self
                 .memory_address_watchers
@@ -207,8 +298,10 @@ impl Plugin for Debugger {
                 .find(|m| m.address == addr)
             {
                 Some(it) => {
-                    messages.push(format!("Read {val:#04x} at {addr:#x}"));
-                    self.is_stepping = true;
+                    if it.print_on_read {
+                        messages.push(format!("Read {val:#04x} at {addr:#x}"));
+                    }
+                    self.is_stepping |= it.step_on_read;
                 }
                 None => {}
             }
@@ -222,11 +315,11 @@ impl Plugin for Debugger {
                 .find(|m| m.address == addr)
             {
                 Some(it) => {
-                    // messages.push(format!(
-                    //     "Memory change at {addr:#x}: {old:#04x} -> {new:#04x}"
-                    // ));
+                    messages.push(format!(
+                        "Memory change at {addr:#x}: {old:#04x} -> {new:#04x}"
+                    ));
                     it.last_seen_value = new;
-                    self.is_stepping = true;
+                    self.is_stepping |= it.step_on_write;
                 }
                 None => {}
             }
@@ -236,7 +329,7 @@ impl Plugin for Debugger {
         }
         if self.is_stepping && should_print_instruction {
             let name = if let Some(name) = self.find_function_name_for_address(ip) {
-                format!(" // {name}")
+                format!(" // in {name}")
             } else {
                 String::new()
             };
@@ -259,7 +352,7 @@ impl Plugin for Debugger {
                 })
             ));
         }
-        if !self.is_silent || self.is_stepping {
+        if !self.is_silent(ip) || self.is_stepping {
             for register in self.registers.diff(*registers) {
                 if register == RegisterIndex::Cpsr {
                     self.println(format!(
@@ -301,9 +394,9 @@ impl Plugin for Debugger {
             && !self
                 .breakpoints
                 .iter()
-                .any(|b| b.ip == ip && b.condition_met(*registers));
+                .any(|b| b.ip == ip && b.condition_met(*registers) && b.action(*registers));
         self.is_stepping = !should_continue;
-        if !self.is_silent || self.is_stepping {
+        if !self.is_silent(ip) || self.is_stepping {
             let name = if let Some(name) = self.find_function_name_for_address(ip) {
                 format!(" // {name}")
             } else {
@@ -346,6 +439,7 @@ impl Plugin for Debugger {
                     self.breakpoints.push(Breakpoint {
                         ip: target,
                         condition: None,
+                        action: None,
                         fragile: true,
                     });
                     self.is_stepping = false;

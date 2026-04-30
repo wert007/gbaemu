@@ -1,4 +1,4 @@
-use std::{fmt::Debug, time::Instant};
+use std::{collections::VecDeque, fmt::Debug, time::Instant};
 
 use crate::{interrupts::Interrupt, memory::MemoryPlugin};
 
@@ -30,6 +30,7 @@ pub struct InterruptWaitstate {
     internal_memory_control: u32,
 
     interrupt_last_firing_time: [usize; Interrupt::COUNT],
+    interrupt_queue: VecDeque<Interrupt>,
 }
 
 impl InterruptWaitstate {
@@ -48,6 +49,22 @@ impl InterruptWaitstate {
             true
         } else {
             false
+        }
+    }
+
+    pub(crate) fn queue(&mut self, interrupt: Interrupt) {
+        if self.interrupt_queue.contains(&interrupt) {
+            return;
+        }
+        self.interrupt_queue.push_back(interrupt);
+    }
+
+    pub(crate) fn next(&mut self, tick: usize) -> Option<Interrupt> {
+        let next = self.interrupt_queue.front()?;
+        if self.should_raise_interrupt(*next, tick) {
+            self.interrupt_queue.pop_front()
+        } else {
+            None
         }
     }
 }

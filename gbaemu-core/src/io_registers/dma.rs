@@ -82,7 +82,21 @@ impl MemoryPlugin for DmaChannel {
             0xB0..0xb4 => write_byte_to_word(&mut self.source_address, address - 0xb0, byte),
             0xb4..0xb8 => write_byte_to_word(&mut self.destination_address, address - 0xb4, byte),
             0xB8..0xBA => write_byte_to_half_word(&mut self.word_count, address - 0xB8, byte),
-            0xBA..0xBC => write_byte_to_half_word(&mut self.control, address - 0xBA, byte),
+            0xBA..0xBC => {
+                // 1011 0110 0000 0000
+                //        98 7654 3210
+                // repeat, 32bit, sound_fifo, enable
+                write_byte_to_half_word(&mut self.control, address - 0xBA, byte);
+                // eprintln!("self.source_address = 0x{:x}", self.source_address);
+                // eprintln!(
+                // "self.destination_address = 0x{:x}",
+                // self.destination_address
+                // );
+                // eprintln!("self.word_count = 0x{:x}", self.word_count);
+                // TODO: Support DMA Transfers:
+                self.control &= 0x7FFF;
+                // eprintln!("self.control = 0x{:x} // always disabled", self.control);
+            }
             0xe0..0x100 => {}
             _ => todo!("{address:x}"),
         }

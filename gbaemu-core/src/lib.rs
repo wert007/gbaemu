@@ -1,4 +1,5 @@
 use std::{
+    collections::VecDeque,
     io::{IsTerminal, Read},
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -9,11 +10,15 @@ use io_registers::{GbaIo, lcd::Lcd};
 use memory::{Memory, MemoryPlugin, SimpleMemory};
 use registers::{Mode, RegisterIndex, RegisterList, Registers};
 
-use crate::{io_registers::lcd::PixelFormat, plugins::Plugin};
+use crate::{
+    interrupts::Interrupt,
+    io_registers::lcd::PixelFormat,
+    plugins::{Plugin, PluginWishes},
+};
 
 mod bitmod;
-mod instructions;
-mod interrupts;
+pub mod instructions;
+pub mod interrupts;
 pub mod io_registers;
 pub mod memory;
 pub mod plugins;
@@ -166,11 +171,8 @@ impl Gba {
         }
         self.ticks += 1;
         let registers = self.registers;
-        let interrupts = self.gba_io.lock().unwrap().run_cycle(self.ticks);
-        for interrupt in interrupts {
-            self.raise_interrupt(interrupt);
-        }
-
+        self.gba_io.lock().unwrap().run_cycle(self.ticks);
+        self.handle_interrupts();
         let mode = self.registers.cpsr().mode();
         let ip = self.registers.read_raw(RegisterIndex::Ip);
         let instruction = self.fetch().unwrap_or_else(|e| {
@@ -269,26 +271,34 @@ impl Gba {
         self.gba_io.lock().unwrap().lcd.load_tiles(format)
     }
 
-    fn raise_interrupt(&mut self, interrupt: interrupts::Interrupt) {
-        if self.disable_interrupts_since_nothing_is_being_executed
-            || !self
-                .gba_io
-                .lock()
-                .unwrap()
-                .interrupt
-                .should_raise_interrupt(interrupt, self.ticks)
-        {
-            // dbg!("Ignored interrupt", interrupt);
+    pub fn load_tiles_obj(&self, format: PixelFormat) -> Vec<Vec<u8>> {
+        self.gba_io.lock().unwrap().lcd.load_tiles_obj(format)
+    }
+
+    fn handle_interrupts(&mut self) {
+        let Some(interrupt) = self.gba_io.lock().unwrap().interrupt.next(self.ticks) else {
+            return;
+        };
+        let whishes = self
+            .plugins
+            .iter_mut()
+            .filter_map(|p| p.interrupt_occured(interrupt))
+            .fold(PluginWishes::default(), |a, c| a.combined_with(c));
+        if whishes.pause_execution() {
+            // Not quite right, but tbh, also not important right now!
+            self.gba_io.lock().unwrap().interrupt.queue(interrupt);
             return;
         }
+        let ip = self.registers.read(RegisterIndex::Ip);
+        // let instruction = self.fetch().unwrap_or_else(|e| {
+        //     // dbg!(self);
+        //     panic!("Invalid Instruction at {ip}., {e}")
+        // });
         let psr = self.registers.read(RegisterIndex::Cpsr);
         self.registers.cpsr_mut().set_mode(Mode::Irq);
         self.registers.write(RegisterIndex::Spsr, psr);
         self.registers.cpsr_mut().set_is_thumb(false);
-        self.registers.write(
-            RegisterIndex::Lr,
-            self.registers.read_raw(RegisterIndex::Ip),
-        );
+        self.registers.write(RegisterIndex::Lr, ip);
         self.registers.write(RegisterIndex::Ip, 0x00000018);
     }
 }

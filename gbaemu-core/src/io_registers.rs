@@ -48,8 +48,15 @@ impl GbaIo {
         self.lcd.load_palette()
     }
 
-    pub fn run_cycle(&mut self, tick: usize) -> Vec<Interrupt> {
-        self.lcd.run_cycle(tick)
+    pub fn run_cycle(&mut self, tick: usize) {
+        let mut result = Vec::with_capacity(8);
+
+        result.append(&mut self.lcd.run_cycle(tick));
+        result.append(&mut self.serial_com.run_cycle(tick));
+        for interrupt in result {
+            self.interrupt.queue(interrupt);
+        }
+        // result
     }
 
     pub fn find_for_address(&self, address: usize) -> Option<&dyn MemoryPlugin> {
