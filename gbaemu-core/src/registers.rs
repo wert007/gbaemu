@@ -1,13 +1,14 @@
 use std::fmt::{Debug, Display};
 
+use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
 
 use crate::instructions::{
-    display::{DisplayContext, DisplayedRegisterIndex, DisplayedRegisterList},
     InstructionFlags,
+    display::{DisplayContext, DisplayedRegisterIndex, DisplayedRegisterList},
 };
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub struct Registers([[u32; 18]; 6]);
 
 impl Registers {
@@ -40,11 +41,7 @@ impl Registers {
     pub fn read(&self, register: RegisterIndex) -> u32 {
         self.read_raw(register)
             + if register == RegisterIndex::Ip {
-                if self.cpsr().is_thumb() {
-                    4
-                } else {
-                    8
-                }
+                if self.cpsr().is_thumb() { 4 } else { 8 }
             } else {
                 0
             }
@@ -143,6 +140,11 @@ impl Registers {
             }
         }
         eprintln!();
+    }
+
+    pub fn with(mut self, reg: RegisterIndex, value: u32) -> Registers {
+        self.write(reg, value);
+        self
     }
 }
 
@@ -351,7 +353,7 @@ impl Iterator for RegisterListIterator {
             if self.1 > 17 {
                 return None;
             }
-            if self.0 .0 & 1 << self.1 > 0 {
+            if self.0.0 & 1 << self.1 > 0 {
                 break Some(RegisterIndex::try_from(self.1).unwrap());
             }
             self.1 += 1;
@@ -375,6 +377,8 @@ impl Iterator for RegisterListIterator {
     strum::FromRepr,
     strum::AsRefStr,
     strum::EnumString,
+    Serialize,
+    Deserialize,
 )]
 #[strum(serialize_all = "UPPERCASE")]
 pub enum RegisterIndex {

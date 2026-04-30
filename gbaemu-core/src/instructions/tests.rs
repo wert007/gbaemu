@@ -8,6 +8,7 @@ fn decode_set_of_instructions_correct() {
         (
             0xe8bd5000u32,
             Instruction {
+                size: 4,
                 condition: Condition::Always,
                 op: InstructionOp::StoreOrLoadRegisters {
                     is_load: true,
@@ -24,6 +25,7 @@ fn decode_set_of_instructions_correct() {
         (
             0xE008099Bu32,
             Instruction {
+                size: 4,
                 condition: Condition::Always,
                 op: InstructionOp::ShifterOperandInstruction {
                     op: ShifterOperandInstructionOp::Multiplicate,
@@ -31,6 +33,24 @@ fn decode_set_of_instructions_correct() {
                     base: RegisterIndex::R11,
                     destination: RegisterIndex::R8,
                     value: ShifterOperand::Register(RegisterIndex::R9),
+                },
+            },
+        ),
+        (
+            0xe0022822,
+            Instruction {
+                size: 4,
+                condition: Condition::Always,
+                op: InstructionOp::ShifterOperandInstruction {
+                    op: ShifterOperandInstructionOp::And,
+                    update_flags: false,
+                    base: RegisterIndex::R2,
+                    destination: RegisterIndex::R2,
+                    value: ShifterOperand::RegisterImmediate(
+                        RegisterIndex::R2,
+                        ShiftOperator::RightShift,
+                        16,
+                    ),
                 },
             },
         ),
@@ -47,6 +67,7 @@ fn test_branch_instructions_arm() {
         (
             0xea000018u32,
             Instruction {
+                size: 4,
                 condition: Condition::Always,
                 op: InstructionOp::Branch {
                     store_return_address_in_link_register: false,
@@ -61,6 +82,7 @@ fn test_branch_instructions_arm() {
         (
             0xeb00000f,
             Instruction {
+                size: 4,
                 condition: Condition::Always,
                 op: InstructionOp::Branch {
                     store_return_address_in_link_register: true,
@@ -75,6 +97,7 @@ fn test_branch_instructions_arm() {
         (
             0xe12fff10,
             Instruction {
+                size: 4,
                 condition: Condition::Always,
                 op: InstructionOp::Branch {
                     store_return_address_in_link_register: false,
@@ -102,18 +125,52 @@ fn test_branch_instructions_arm() {
 }
 
 #[test]
+fn test_arm_instructions() {
+    const DUMMY_CARTRIGDE: Cartridge = Cartridge { raw: Vec::new() };
+
+    let input = [(
+        0xe0022822u32,
+        Instruction {
+            size: 4,
+            condition: Condition::Always,
+            op: InstructionOp::ShifterOperandInstruction {
+                op: ShifterOperandInstructionOp::And,
+                update_flags: false,
+                base: RegisterIndex::R2,
+                destination: RegisterIndex::R2,
+                value: ShifterOperand::RegisterImmediate(
+                    RegisterIndex::R2,
+                    ShiftOperator::RightShift,
+                    16,
+                ),
+            },
+        },
+        Registers::new().with(RegisterIndex::R2, 0),
+        Registers::new().with(RegisterIndex::R2, 0),
+    )];
+    for (encoded, decoded, before, after) in input {
+        assert_eq!(Instruction::decode_arm(encoded), Ok(decoded));
+        let mut state = Gba::new(DUMMY_CARTRIGDE);
+        state.registers = before;
+        decoded.execute(&mut state);
+        assert_eq!(state.registers, after);
+    }
+}
+#[test]
 fn test_branch_instructions_thumb() {
     const DUMMY_CARTRIGDE: Cartridge = Cartridge { raw: Vec::new() };
     let input: &[((u16, u16), Instruction, &[(RegisterIndex, u32)])] = &[(
-        (0xe083, 0x2d71),
+        (0xe083, 0x0),
+        // (0xe083, 0x2d71),
         Instruction {
+            size: 2,
             condition: Condition::Always,
             op: InstructionOp::Branch {
                 store_return_address_in_link_register: false,
                 return_address_is_thumb: true,
                 does_switch_mode: false,
                 target: BranchTarget::Offset(0x106),
-                instruction_size: 4,
+                instruction_size: 2,
             },
         },
         &[(RegisterIndex::Ip, 0x116)],
@@ -139,6 +196,7 @@ fn test_instruction_pointer_register() {
     let input = [(
         0xe28f0001,
         Instruction {
+            size: 4,
             condition: Condition::Always,
             op: InstructionOp::ShifterOperandInstruction {
                 op: ShifterOperandInstructionOp::Add,
@@ -184,6 +242,7 @@ fn test_instruction_decoding() -> Result<(), InstructionDecodeError> {
         (
             0xc61u16,
             Instruction {
+                size: 2,
                 condition: Condition::Always,
                 op: InstructionOp::ShifterOperandInstruction {
                     op: ShifterOperandInstructionOp::Move,
@@ -201,6 +260,7 @@ fn test_instruction_decoding() -> Result<(), InstructionDecodeError> {
         (
             0x1909,
             Instruction {
+                size: 2,
                 condition: Condition::Always,
                 op: InstructionOp::ShifterOperandInstruction {
                     op: ShifterOperandInstructionOp::Add,
@@ -214,6 +274,7 @@ fn test_instruction_decoding() -> Result<(), InstructionDecodeError> {
         (
             0x43d0,
             Instruction {
+                size: 2,
                 condition: Condition::Always,
                 op: InstructionOp::ShifterOperandInstruction {
                     op: ShifterOperandInstructionOp::MoveNegate,
@@ -227,6 +288,7 @@ fn test_instruction_decoding() -> Result<(), InstructionDecodeError> {
         (
             0x1E52,
             Instruction {
+                size: 2,
                 condition: Condition::Always,
                 op: InstructionOp::ShifterOperandInstruction {
                     op: ShifterOperandInstructionOp::Subtract,
@@ -240,6 +302,7 @@ fn test_instruction_decoding() -> Result<(), InstructionDecodeError> {
         (
             0x4561,
             Instruction {
+                size: 2,
                 condition: Condition::Always,
                 op: InstructionOp::ShifterOperandInstruction {
                     op: ShifterOperandInstructionOp::Compare,
@@ -253,6 +316,7 @@ fn test_instruction_decoding() -> Result<(), InstructionDecodeError> {
         (
             0x4778,
             Instruction {
+                size: 2,
                 condition: Condition::Always,
                 op: InstructionOp::Branch {
                     store_return_address_in_link_register: false,
@@ -266,6 +330,7 @@ fn test_instruction_decoding() -> Result<(), InstructionDecodeError> {
         (
             0x585a,
             Instruction {
+                size: 2,
                 condition: Condition::Always,
                 op: InstructionOp::StoreOrLoadRegister {
                     is_load: true,
@@ -285,6 +350,7 @@ fn test_instruction_decoding() -> Result<(), InstructionDecodeError> {
         (
             0xb530,
             Instruction {
+                size: 2,
                 condition: Condition::Always,
                 op: InstructionOp::StoreOrLoadRegisters {
                     is_load: false,
@@ -301,6 +367,7 @@ fn test_instruction_decoding() -> Result<(), InstructionDecodeError> {
         // (
         //     0xbd30,
         //     Instruction {
+        //         size: 4,
         //         condition: Condition::Always,
         //         op: InstructionOp::StoreOrLoadRegisters {
         //             is_load: true,
@@ -317,6 +384,7 @@ fn test_instruction_decoding() -> Result<(), InstructionDecodeError> {
         (
             0x2862,
             Instruction {
+                size: 2,
                 condition: Condition::Always,
                 op: InstructionOp::ShifterOperandInstruction {
                     op: ShifterOperandInstructionOp::Compare,
@@ -330,6 +398,7 @@ fn test_instruction_decoding() -> Result<(), InstructionDecodeError> {
         (
             0x8121,
             Instruction {
+                size: 2,
                 condition: Condition::Always,
                 op: InstructionOp::StoreOrLoadRegister {
                     is_load: false,
@@ -350,6 +419,7 @@ fn test_instruction_decoding() -> Result<(), InstructionDecodeError> {
         (
             0xa255,
             Instruction {
+                size: 2,
                 condition: Condition::Always,
                 op: InstructionOp::ShifterOperandInstruction {
                     op: ShifterOperandInstructionOp::Add,
@@ -369,6 +439,7 @@ fn test_instruction_decoding() -> Result<(), InstructionDecodeError> {
         (
             0xb8a103fcu32,
             Instruction {
+                size: 4,
                 condition: Condition::LessThan,
                 op: InstructionOp::StoreOrLoadRegisters {
                     is_load: false,
@@ -391,6 +462,7 @@ fn test_instruction_decoding() -> Result<(), InstructionDecodeError> {
         (
             0xe751500c,
             Instruction {
+                size: 4,
                 condition: Condition::Always,
                 op: InstructionOp::StoreOrLoadRegister {
                     is_load: true,
@@ -414,6 +486,7 @@ fn test_instruction_decoding() -> Result<(), InstructionDecodeError> {
         (
             0xe28f0f96,
             Instruction {
+                size: 4,
                 condition: Condition::Always,
                 op: InstructionOp::ShifterOperandInstruction {
                     op: ShifterOperandInstructionOp::Add,
@@ -427,6 +500,7 @@ fn test_instruction_decoding() -> Result<(), InstructionDecodeError> {
         (
             0xe59f01cc,
             Instruction {
+                size: 4,
                 condition: Condition::Always,
                 op: InstructionOp::StoreOrLoadRegister {
                     is_load: true,
@@ -446,6 +520,7 @@ fn test_instruction_decoding() -> Result<(), InstructionDecodeError> {
         (
             0xe1d270b0,
             Instruction {
+                size: 4,
                 condition: Condition::Always,
                 op: InstructionOp::StoreOrLoadRegister {
                     is_load: true,
@@ -465,6 +540,7 @@ fn test_instruction_decoding() -> Result<(), InstructionDecodeError> {
         (
             0xe19c10f1,
             Instruction {
+                size: 4,
                 condition: Condition::Always,
                 op: InstructionOp::StoreOrLoadRegister {
                     is_load: true,

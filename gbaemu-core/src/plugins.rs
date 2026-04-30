@@ -1,3 +1,5 @@
+pub use debug_symbols::*;
+
 mod debug_symbols;
 
 pub mod debugger;

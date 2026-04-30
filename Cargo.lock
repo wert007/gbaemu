@@ -521,6 +521,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "gba-decomp"
+version = "0.1.0"
+dependencies = [
+ "gbaemu-core",
+ "serde_json5",
+]
+
+[[package]]
 name = "gbaemu"
 version = "0.1.0"
 dependencies = [

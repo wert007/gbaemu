@@ -19,7 +19,7 @@ mod tests;
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Condition {
+pub enum Condition {
     Equal,
     NotEqual,
     CarrySet,
@@ -85,8 +85,16 @@ impl Condition {
     }
 }
 
+#[derive(Error, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ConditionError {
+    #[error("Must be below 15, was {0}")]
+    OutOfRange(u8),
+    #[error("Meaning of 15 is undefined I think.")]
+    InvalidValue,
+}
+
 impl TryFrom<u8> for Condition {
-    type Error = ();
+    type Error = ConditionError;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         Ok(match value {
@@ -105,16 +113,17 @@ impl TryFrom<u8> for Condition {
             12 => Self::GreaterThan,
             13 => Self::LessThanEquals,
             14 => Self::Always,
-            15 => todo!("How does the GBA behave here?"),
-            _ => return Err(()),
+            15 => return Err(ConditionError::InvalidValue),
+            _ => return Err(ConditionError::OutOfRange(value)),
         })
     }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Instruction {
-    pub(super) condition: Condition,
-    pub(super) op: InstructionOp,
+    pub condition: Condition,
+    pub op: InstructionOp,
+    pub size: usize,
 }
 
 impl Display for Instruction {
@@ -865,12 +874,14 @@ pub enum InstructionDecodeError {
     UnknownArm(u32),
     #[error("Unknown Thumb Instruction 0x{0:04X} ({0:#b})")]
     UnknownThumb(u16),
+    #[error("Unknown Thumb Instruction 0x{0:04X}{1:04X} ({0:#b}{1:b})")]
+    UnknownThumbWide(u16, u16),
     #[error("Unknown Op Code 1 {0:03b} (Instruction was {1:#08X})")]
     UnknownOpCode1(u32, u32),
     #[error("Register Index out of range (<18) {0}")]
     InvalidRegisterIndex(u32),
     #[error("Invalid value of condition found.")]
-    InvalidCondition,
+    InvalidCondition(#[from] ConditionError),
     #[error("Invalid value for register list found.")]
     InvalidRegisterList,
     #[error("Invalid value for store load memory address found {0:x}.")]

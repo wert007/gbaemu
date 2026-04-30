@@ -314,7 +314,7 @@ impl ShiftOperator {
                 if rhs == 0 {
                     (lhs as i32) < 0
                 } else {
-                    (lhs & 1 << (rhs - 1)) > 0
+                    (lhs & (1 << (rhs - 1))) > 0
                 }
             }
             ShiftOperator::ArithmeticRightShift => {

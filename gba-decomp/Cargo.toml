@@ -1,0 +1,8 @@
+[package]
+name = "gba-decomp"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+gbaemu-core = { version = "0.1.0", path = "../gbaemu-core" }
+serde_json5 = "0.2.1"

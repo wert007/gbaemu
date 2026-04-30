@@ -2,8 +2,7 @@ use super::*;
 
 impl Instruction {
     pub fn decode_arm(word: u32) -> Result<Self, InstructionDecodeError> {
-        let condition = Condition::try_from((word >> 28) as u8)
-            .map_err(|()| InstructionDecodeError::InvalidCondition)?;
+        let condition = Condition::try_from((word >> 28) as u8)?;
         let op_code_1 = (word & 0x0E00_0000) >> 25;
         match op_code_1 {
             0b101 => {
@@ -17,6 +16,7 @@ impl Instruction {
                 offset <<= 2;
                 let offset = offset as i32;
                 Ok(Instruction {
+                    size: 4,
                     condition,
                     op: InstructionOp::Branch {
                         target: BranchTarget::Offset(offset),
@@ -38,6 +38,7 @@ impl Instruction {
                 // if rd == RegisterIndex::Ip && is_load {
                 //     // let offset = (offset | 0xffff_f000) as i32;
                 //     Ok(Instruction {
+                //         size: 4,
                 //         condition,
                 //         op: InstructionOp::Branch {
                 //             store_return_address_in_link_register: false,
@@ -49,6 +50,7 @@ impl Instruction {
                 //     })
                 // } else {
                 Ok(Instruction {
+                    size: 4,
                     condition,
                     op: InstructionOp::StoreOrLoadRegister {
                         is_load,
@@ -90,6 +92,7 @@ impl Instruction {
                     let is_load = (word & 1 << 20) > 0;
                     return match op_code_3 {
                         0b1011 => Ok(Instruction {
+                            size: 4,
                             condition,
                             op: InstructionOp::StoreOrLoadRegister {
                                 is_load,
@@ -99,6 +102,7 @@ impl Instruction {
                             },
                         }),
                         0b1111 => Ok(Instruction {
+                            size: 4,
                             condition,
                             op: InstructionOp::StoreOrLoadRegister {
                                 is_load,
@@ -120,6 +124,7 @@ impl Instruction {
                                 .map_err(|()| InstructionDecodeError::InvalidRegisterIndex(rd))?;
 
                             Ok(Instruction {
+                                size: 4,
                                 condition,
                                 op: InstructionOp::ShifterOperandInstruction {
                                     op: ShifterOperandInstructionOp::Multiplicate,
@@ -133,6 +138,7 @@ impl Instruction {
                         _ => Err(InstructionDecodeError::UnknownArm(word)),
                     };
                     // return Ok(Instruction {
+                    //     size: 4,
                     //     condition,
                     //     op: InstructionOp::StoreOrLoadRegister {
                     //         is_load,
@@ -144,10 +150,18 @@ impl Instruction {
                 } else if word & 0x0FB00000 == 0x1000000 {
                     let use_spsr = (word & 1 << 22) > 0;
                     let sbo = (word & 0xF_0000) >> 16;
+
+                    if sbo != 0xF {
+                        return Err(InstructionDecodeError::UnknownArm(word));
+                    }
                     assert_eq!(sbo, 0xF, "Should be ones!");
                     let sbz = word & 0xFFF;
+                    if sbz != 0 {
+                        return Err(InstructionDecodeError::UnknownArm(word));
+                    }
                     assert_eq!(sbz, 0x0, "Should be zeroes!");
                     return Ok(Instruction {
+                        size: 4,
                         condition,
                         op: InstructionOp::Mrs {
                             use_spsr,
@@ -157,11 +171,16 @@ impl Instruction {
                 } else if word & 0x0FF0_00F0 == 0x1200010 {
                     // BX
                     let sbo = (word & 0xfff00) >> 8;
+
+                    if sbo != 0xfff {
+                        return Err(InstructionDecodeError::UnknownArm(word));
+                    }
                     assert_eq!(sbo, 0xfff, "Should be ones!");
                     let rm = word & 0xF;
                     let rm = RegisterIndex::try_from(rm)
                         .map_err(|()| InstructionDecodeError::InvalidRegisterIndex(rm))?;
                     return Ok(Instruction {
+                        size: 4,
                         condition,
                         op: InstructionOp::Branch {
                             store_return_address_in_link_register: false,
@@ -174,11 +193,18 @@ impl Instruction {
                 } else if word & 0x0DB00000 == 0x0120_0000 {
                     let use_spsr = (word & 1 << 22) > 0;
                     let sbo = (word & 0xf000) >> 12;
+                    if sbo != 0xf {
+                        return Err(InstructionDecodeError::UnknownArm(word));
+                    }
                     assert_eq!(sbo, 0xf, "Should be ones!");
                     let operand = if is_immediate {
                         ShifterOperand::try_from(word)?
                     } else {
                         let sbz = (word & 0xff0) >> 4;
+
+                        if sbz != 0 {
+                            return Err(InstructionDecodeError::UnknownArm(word));
+                        }
                         assert_eq!(sbz, 0, "Should be zeros!");
                         let rm = word & 0xF;
                         let rm = RegisterIndex::try_from(rm)
@@ -188,6 +214,7 @@ impl Instruction {
                     let field_mask = (word & 0xF_0000) >> 16;
                     let field_mask = MsrFieldMask::try_from(field_mask as u8).expect("TODO");
                     return Ok(Instruction {
+                        size: 4,
                         condition,
                         op: InstructionOp::Msr {
                             use_spsr,
@@ -211,27 +238,36 @@ impl Instruction {
                     0x05 => ShifterOperandInstructionOp::AddWithCarry,
                     0x08 => ShifterOperandInstructionOp::Test,
                     0x09 => {
+                        if !update_flags {
+                            return Err(InstructionDecodeError::UnknownArm(word));
+                        }
                         assert!(update_flags, "value was {word:x}");
                         ShifterOperandInstructionOp::TestEquals
                     }
                     0x0A => {
+                        if !update_flags {
+                            return Err(InstructionDecodeError::UnknownArm(word));
+                        }
                         assert!(update_flags);
+
                         ShifterOperandInstructionOp::Compare
                     }
                     0x0C => ShifterOperandInstructionOp::InclusiveOr,
                     0x0D => {
+                        if rn != RegisterIndex::R0 {
+                            return Err(InstructionDecodeError::UnknownArm(word));
+                        }
                         assert_eq!(rn, RegisterIndex::R0);
 
                         ShifterOperandInstructionOp::Move
                     }
                     0x0E => ShifterOperandInstructionOp::BitClear,
                     unknown_op_code_2 => {
-                        println!("op_code_1: {op_code_1:03b}");
-                        println!("op_code_2: {unknown_op_code_2:08b}");
                         return Err(InstructionDecodeError::UnknownArm(word));
                     }
                 };
                 Ok(Instruction {
+                    size: 4,
                     condition,
                     op: InstructionOp::ShifterOperandInstruction {
                         op,
@@ -246,7 +282,9 @@ impl Instruction {
                 let is_post_indexing = (word & 1 << 24) == 0;
                 let negate_offset = (word & 1 << 23) == 0;
                 let s_bit = (word & 1 << 22) > 0;
-                assert!(!s_bit);
+                if s_bit {
+                    return Err(InstructionDecodeError::UnknownArm(word));
+                }
                 let register_base_write_back = (word & 1 << 21) > 0;
                 let is_load = (word & 1 << 20) > 0;
                 let rn = (word & 0xF_0000) >> 16;
@@ -254,6 +292,7 @@ impl Instruction {
                     .map_err(|()| InstructionDecodeError::InvalidRegisterIndex(rn))?;
                 let register_list = RegisterList::try_from(word & 0xFFFF).unwrap();
                 Ok(Instruction {
+                    size: 4,
                     condition,
                     op: InstructionOp::StoreOrLoadRegisters {
                         is_load,
@@ -271,7 +310,7 @@ impl Instruction {
         }
     }
 
-    pub(crate) fn decode_thumb(
+    pub fn decode_thumb(
         half_word: u16,
         next_half_word: u16,
     ) -> Result<Instruction, InstructionDecodeError> {
@@ -285,10 +324,7 @@ impl Instruction {
             0b101 => thumb_op_code_101(half_word),
             0b110 => thumb_op_code_110(half_word),
             0b111 => thumb_op_code_111(half_word, next_half_word),
-            unknown_op_code_1 => {
-                println!("op_code_1: {unknown_op_code_1:03b}");
-                Err(InstructionDecodeError::UnknownThumb(half_word))
-            }
+            unknown_op_code_1 => Err(InstructionDecodeError::UnknownThumb(half_word)),
         }
     }
 }
@@ -306,7 +342,12 @@ fn thumb_op_code_111(
 
         let does_switch_mode = (next_half_word & 0x1000) == 0;
         let h = (next_half_word & 0x0800) > 0;
-        assert!(h);
+        if !h {
+            return Err(InstructionDecodeError::UnknownThumbWide(
+                half_word,
+                next_half_word,
+            ));
+        }
         let second_offset = (next_half_word & 0x07FF) as u32;
         let second_offset = second_offset << 1;
         let offset = (first_offset
@@ -317,6 +358,7 @@ fn thumb_op_code_111(
             }) as i32;
 
         Ok(Instruction {
+            size: 4,
             condition: Condition::Always,
             op: InstructionOp::Branch {
                 store_return_address_in_link_register: true,
@@ -334,6 +376,7 @@ fn thumb_op_code_111(
 
         let offset = offset as i16 as i32;
         Ok(Instruction {
+            size: 2,
             condition: Condition::Always,
             op: InstructionOp::Branch {
                 store_return_address_in_link_register: false,
@@ -347,11 +390,17 @@ fn thumb_op_code_111(
         // This is valid on GBA
         let does_switch_mode = (half_word & 0x1000) == 0;
         let h = (half_word & 0x0800) > 0;
-        assert!(h);
+        if !h {
+            return Err(InstructionDecodeError::UnknownThumbWide(
+                half_word,
+                next_half_word,
+            ));
+        }
         let offset = (half_word & 0x07FF) as u32;
         let offset = offset << 1;
         let offset = offset as i32;
         Ok(Instruction {
+            size: 2,
             condition: Condition::Always,
             op: InstructionOp::Branch {
                 store_return_address_in_link_register: true,
@@ -368,11 +417,11 @@ fn thumb_op_code_111(
 
 fn thumb_op_code_110(half_word: u16) -> Result<Instruction, InstructionDecodeError> {
     if (half_word & 1 << 12) > 0 {
-        let condition = Condition::try_from(((half_word & 0x0f00) >> 8) as u8)
-            .map_err(|()| InstructionDecodeError::InvalidCondition)?;
+        let condition = Condition::try_from(((half_word & 0x0f00) >> 8) as u8)?;
         let offset = (half_word & 0xff) as i8;
         let offset = (offset as i32) << 1;
         Ok(Instruction {
+            size: 2,
             condition,
             op: InstructionOp::Branch {
                 store_return_address_in_link_register: false,
@@ -390,6 +439,7 @@ fn thumb_op_code_110(half_word: u16) -> Result<Instruction, InstructionDecodeErr
         let register_list = RegisterList::try_from((half_word & 0x00ff) as u32)
             .map_err(|()| InstructionDecodeError::InvalidRegisterList)?;
         Ok(Instruction {
+            size: 2,
             condition: Condition::Always,
             op: InstructionOp::StoreOrLoadRegisters {
                 is_load,
@@ -419,6 +469,7 @@ fn thumb_op_code_101(half_word: u16) -> Result<Instruction, InstructionDecodeErr
             let rd = RegisterIndex::try_from(rd)
                 .map_err(|()| InstructionDecodeError::InvalidRegisterIndex(rd))?;
             Ok(Instruction {
+                size: 2,
                 condition: Condition::Always,
                 op: InstructionOp::ShifterOperandInstruction {
                     op: ShifterOperandInstructionOp::Add,
@@ -438,6 +489,8 @@ fn thumb_op_code_101(half_word: u16) -> Result<Instruction, InstructionDecodeErr
             };
             let immediate = ((half_word & 0x007f) << 2) as _;
             Ok(Instruction {
+                size: 2,
+
                 condition: Condition::Always,
                 op: InstructionOp::ShifterOperandInstruction {
                     op,
@@ -454,6 +507,8 @@ fn thumb_op_code_101(half_word: u16) -> Result<Instruction, InstructionDecodeErr
             let register_list = RegisterList::try_from(value)
                 .map_err(|()| InstructionDecodeError::InvalidRegisterList)?;
             Ok(Instruction {
+                size: 2,
+
                 condition: Condition::Always,
                 op: InstructionOp::StoreOrLoadRegisters {
                     is_load: false,
@@ -470,6 +525,8 @@ fn thumb_op_code_101(half_word: u16) -> Result<Instruction, InstructionDecodeErr
             let register_list = RegisterList::try_from(register_list as u32)
                 .map_err(|()| InstructionDecodeError::InvalidRegisterList)?;
             Ok(Instruction {
+                size: 2,
+
                 condition: Condition::Always,
                 op: InstructionOp::StoreOrLoadRegisters {
                     is_load: true,
@@ -480,10 +537,7 @@ fn thumb_op_code_101(half_word: u16) -> Result<Instruction, InstructionDecodeErr
                 },
             })
         }
-        err => {
-            println!("op_code_1 was 0b101 and op_code_2 was {err:05b}");
-            Err(InstructionDecodeError::UnknownThumb(half_word))
-        }
+        err => Err(InstructionDecodeError::UnknownThumb(half_word)),
     }
 }
 
@@ -516,6 +570,8 @@ fn thumb_op_code_100(half_word: u16) -> Result<Instruction, InstructionDecodeErr
         ((half_word & 0xff) << 2) as u32
     };
     Ok(Instruction {
+        size: 2,
+
         condition: Condition::Always,
         op: InstructionOp::StoreOrLoadRegister {
             is_load,
@@ -545,6 +601,8 @@ fn thumb_op_code_011(half_word: u16) -> Result<Instruction, InstructionDecodeErr
     let immediate = if is_byte { immediate } else { immediate << 2 };
     let is_load = (half_word & 0x0800) > 0;
     Ok(Instruction {
+        size: 2,
+
         condition: Condition::Always,
         op: InstructionOp::StoreOrLoadRegister {
             is_load,
@@ -634,11 +692,12 @@ fn thumb_op_code_010(half_word: u16) -> Result<Instruction, InstructionDecodeErr
                     rd,
                 ),
                 unknown_alu_op_code => {
-                    println!("alu_op_code: {unknown_alu_op_code:04b}");
                     return Err(InstructionDecodeError::UnknownThumb(half_word));
                 }
             };
             Ok(Instruction {
+                size: 2,
+
                 condition: Condition::Always,
                 op: InstructionOp::ShifterOperandInstruction {
                     op,
@@ -664,6 +723,8 @@ fn thumb_op_code_010(half_word: u16) -> Result<Instruction, InstructionDecodeErr
                     let rm = RegisterIndex::try_from(rm)
                         .map_err(|()| InstructionDecodeError::InvalidRegisterIndex(rm))?;
                     Ok(Instruction {
+                        size: 2,
+
                         condition: Condition::Always,
                         op: InstructionOp::ShifterOperandInstruction {
                             op: ShifterOperandInstructionOp::Compare,
@@ -679,8 +740,13 @@ fn thumb_op_code_010(half_word: u16) -> Result<Instruction, InstructionDecodeErr
                     let rm = RegisterIndex::try_from(rm as u32)
                         .map_err(|()| InstructionDecodeError::InvalidRegisterIndex(rm as _))?;
                     let sbz = half_word & 0x7;
+                    if sbz != 0 {
+                        return Err(InstructionDecodeError::UnknownThumb(half_word));
+                    }
                     assert_eq!(sbz, 0, "Should be zero!");
                     Ok(Instruction {
+                        size: 2,
+
                         condition: Condition::Always,
                         op: InstructionOp::Branch {
                             store_return_address_in_link_register: false,
@@ -703,6 +769,8 @@ fn thumb_op_code_010(half_word: u16) -> Result<Instruction, InstructionDecodeErr
                     let rm = RegisterIndex::try_from(rm)
                         .map_err(|()| InstructionDecodeError::InvalidRegisterIndex(rm))?;
                     Ok(Instruction {
+                        size: 2,
+
                         condition: Condition::Always,
                         op: InstructionOp::ShifterOperandInstruction {
                             op: ShifterOperandInstructionOp::Move,
@@ -718,8 +786,13 @@ fn thumb_op_code_010(half_word: u16) -> Result<Instruction, InstructionDecodeErr
                     let rm = RegisterIndex::try_from(rm)
                         .map_err(|()| InstructionDecodeError::InvalidRegisterIndex(rm))?;
                     let sbz = half_word & 0x0007;
+                    if sbz != 0 {
+                        return Err(InstructionDecodeError::UnknownThumb(half_word));
+                    }
                     assert_eq!(sbz, 0, "Should be zero");
                     Ok(Instruction {
+                        size: 2,
+
                         condition: Condition::Always,
                         op: InstructionOp::Branch {
                             store_return_address_in_link_register: true,
@@ -730,10 +803,7 @@ fn thumb_op_code_010(half_word: u16) -> Result<Instruction, InstructionDecodeErr
                         },
                     })
                 }
-                unknown => {
-                    println!("New High Register or BX instruction! (op_code_3 = {unknown:03b})");
-                    Err(InstructionDecodeError::UnknownThumb(half_word))
-                }
+                unknown => Err(InstructionDecodeError::UnknownThumb(half_word)),
             }
         }
         0b010 | 0b011 => {
@@ -742,6 +812,7 @@ fn thumb_op_code_010(half_word: u16) -> Result<Instruction, InstructionDecodeErr
             let rd = RegisterIndex::try_from(rd)
                 .map_err(|()| InstructionDecodeError::InvalidRegisterIndex(rd))?;
             Ok(Instruction {
+                size: 2,
                 condition: Condition::Always,
                 op: InstructionOp::StoreOrLoadRegister {
                     is_load: true,
@@ -770,6 +841,8 @@ fn thumb_op_code_010(half_word: u16) -> Result<Instruction, InstructionDecodeErr
                 .map_err(|()| InstructionDecodeError::InvalidRegisterIndex(rd as _))?;
 
             Ok(Instruction {
+                size: 2,
+
                 condition: Condition::Always,
                 op: InstructionOp::StoreOrLoadRegister {
                     is_load: false,
@@ -809,6 +882,8 @@ fn thumb_op_code_010(half_word: u16) -> Result<Instruction, InstructionDecodeErr
                 .map_err(|()| InstructionDecodeError::InvalidRegisterIndex(rd as _))?;
 
             Ok(Instruction {
+                size: 2,
+
                 condition: Condition::Always,
                 op: InstructionOp::StoreOrLoadRegister {
                     is_load,
@@ -829,7 +904,6 @@ fn thumb_op_code_010(half_word: u16) -> Result<Instruction, InstructionDecodeErr
             // Err(InstructionDecodeError::UnknownThumb(half_word))
         }
         unknown_op_code_2 => {
-            println!("op_code_2: {unknown_op_code_2:03b}");
             unreachable!("op_code_2 should be < 0b111");
         }
     }
@@ -850,6 +924,8 @@ fn thumb_op_code_001(half_word: u16) -> Result<Instruction, InstructionDecodeErr
         .map_err(|()| InstructionDecodeError::InvalidRegisterIndex(rd as _))?;
     let immediate = half_word & 0x00ff;
     Ok(Instruction {
+        size: 2,
+
         condition: Condition::Always,
         op: InstructionOp::ShifterOperandInstruction {
             op,
@@ -878,6 +954,8 @@ fn thumb_op_code_000(half_word: u16) -> Result<Instruction, InstructionDecodeErr
             ShiftOperator::LeftShift
         };
         Ok(Instruction {
+            size: 2,
+
             condition: Condition::Always,
             op: InstructionOp::ShifterOperandInstruction {
                 op: ShifterOperandInstructionOp::Move,
@@ -897,6 +975,8 @@ fn thumb_op_code_000(half_word: u16) -> Result<Instruction, InstructionDecodeErr
             ShifterOperandInstructionOp::Subtract
         };
         Ok(Instruction {
+            size: 2,
+
             condition: Condition::Always,
             op: InstructionOp::ShifterOperandInstruction {
                 op,
@@ -918,6 +998,8 @@ fn thumb_op_code_000(half_word: u16) -> Result<Instruction, InstructionDecodeErr
         };
         // Add or sub
         Ok(Instruction {
+            size: 2,
+
             condition: Condition::Always,
             op: InstructionOp::ShifterOperandInstruction {
                 op,
@@ -933,6 +1015,8 @@ fn thumb_op_code_000(half_word: u16) -> Result<Instruction, InstructionDecodeErr
             .map_err(|()| InstructionDecodeError::InvalidRegisterIndex(rm))?;
         // Add or sub
         Ok(Instruction {
+            size: 2,
+
             condition: Condition::Always,
             op: InstructionOp::ShifterOperandInstruction {
                 op: ShifterOperandInstructionOp::Move,
