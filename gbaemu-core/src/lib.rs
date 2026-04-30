@@ -271,6 +271,10 @@ impl Gba {
         self.gba_io.lock().unwrap().lcd.swap_buffers(buffer)
     }
 
+    pub fn get_buffer_raw(&self, buffer: &mut [u8; 160 * 240]) {
+        self.gba_io.lock().unwrap().lcd.get_buffer_raw(buffer)
+    }
+
     pub fn load_palette(&self) -> Vec<u32> {
         self.gba_io.lock().unwrap().lcd.load_palette()
     }

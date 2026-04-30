@@ -213,13 +213,12 @@ impl Obj {
         self.enabled
     }
 
-    pub(crate) fn color_at(
+    pub fn palette_index_at(
         &self,
         screen_x: u16,
         screen_y: u16,
         vram: &SimpleMemory,
-        color_ram: &SimpleMemory,
-    ) -> Option<Color> {
+    ) -> Option<u8> {
         let (w, h) = self.size()?;
         let (x, y) = (self.x(), self.y());
         let (screen_x, screen_y) = (screen_x as usize, screen_y as usize);
@@ -272,6 +271,17 @@ impl Obj {
                     + tile_pixel_offset_x) as usize,
             ),
         };
+        Some(index)
+    }
+
+    pub(crate) fn color_at(
+        &self,
+        screen_x: u16,
+        screen_y: u16,
+        vram: &SimpleMemory,
+        color_ram: &SimpleMemory,
+    ) -> Option<Color> {
+        let index = self.palette_index_at(screen_x, screen_y, vram)?;
         if index == 0 {
             return None;
         }

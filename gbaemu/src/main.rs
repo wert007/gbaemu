@@ -318,11 +318,16 @@ fn main() {
         })
     };
     let mut buffer = [0; 160 * 240];
+    let mut buffer_raw = [0u8; 160 * 240];
     if let Some(window) = &mut window {
         while window.is_open() && is_running.load(std::sync::atomic::Ordering::Relaxed) {
             gba.lock().unwrap().swap_buffers(&mut buffer);
             if window.is_key_down(minifb::Key::S) {
                 make_screenshot(&buffer, 240, 160, None);
+            }
+            if window.is_key_down(minifb::Key::T) {
+                gba.lock().unwrap().get_buffer_raw(&mut buffer_raw);
+                make_screenshot_without_palette(&buffer_raw, 240, 160, None);
             }
             if window.is_key_down(minifb::Key::R) {
                 gba.lock().unwrap().reset();
@@ -447,6 +452,31 @@ static mut COUNTER: usize = 0;
 //     }
 // }
 
+fn make_screenshot_without_palette(
+    buffer_raw: &[u8],
+    width: usize,
+    height: usize,
+    name: Option<String>,
+) {
+    let mut buffer = vec![0u32; 160 * 240 * 8 * 8];
+
+    for x in 0..240 {
+        for y in 0..160 {
+            let index = y * 240 + x;
+            // image.mu
+            ibm437::framebuffer::FbFont::regular_8x8().draw_str(
+                &mut buffer,
+                8 * width,
+                x * 8,
+                y * 8,
+                &buffer_raw[index].to_string(),
+                0x101010 * buffer_raw[0] as u32,
+                Some(u32::MAX),
+            );
+        }
+    }
+    make_screenshot(&buffer, width * 8, height * 8, name);
+}
 fn make_screenshot(buffer: &[u32], width: usize, height: usize, name: Option<String>) {
     let mut image = image::DynamicImage::new(width as _, height as _, image::ColorType::Rgba8);
     for (x, y, pixel) in image.as_mut_rgba8().unwrap().enumerate_pixels_mut() {

@@ -56,6 +56,7 @@ impl<const LIMIT: u16> IntoIterator for RotatingIterator<LIMIT> {
         }
     }
 }
+#[derive(Debug, Clone, Copy)]
 pub struct Color {
     r: f32,
     g: f32,
@@ -267,6 +268,28 @@ impl Debug for Lcd {
     }
 }
 
+pub enum RenderTarget<'a> {
+    Pixel(*mut u32),
+    PaletteIndex(&'a mut [u8; 240 * 160]),
+}
+impl<'a> RenderTarget<'a> {
+    fn set(&mut self, screen_x: u16, screen_y: u16, color: Color, palette: u8) {
+        match self {
+            RenderTarget::Pixel(buf) => {
+                let buffer_index = screen_y * 240 + screen_x;
+                unsafe {
+                    buf.offset(buffer_index as _).write(color.to_rgb());
+                }
+                // buf[buffer_index as usize] = color.to_rgb();
+            }
+            RenderTarget::PaletteIndex(buf) => {
+                let buffer_index = screen_y * 240 + screen_x;
+                buf[buffer_index as usize] = palette;
+            }
+        }
+    }
+}
+
 impl Lcd {
     pub(crate) fn new(
         vram: Arc<Mutex<SimpleMemory>>,
@@ -294,7 +317,11 @@ impl Lcd {
         let mut result = Vec::new();
         if tick % 4 == 0 {
             self.memory_interface.vertical_count += 1;
-            self.render();
+            // Let's treat render_update_last_rendered_line as a method with a
+            // view type. So self.buffer should not be accessed there!
+            let buffer = self.buffer.as_ptr() as *mut u32;
+            let mut px_buf = RenderTarget::Pixel(buffer);
+            self.render_update_last_rendered_line(&mut px_buf);
         }
         if self.memory_interface.vertical_count > 228 {
             self.memory_interface.vertical_count = 0;
@@ -305,21 +332,23 @@ impl Lcd {
         result
     }
 
-    fn render(&mut self) {
+    fn render_update_last_rendered_line(&mut self, target: &mut RenderTarget<'_>) {
+        self.render(target);
+        self.last_rendered_line = self.memory_interface.vertical_count.min(160);
+    }
+    fn render(&self, target: &mut RenderTarget<'_>) {
         match self.display_mode() {
-            DisplayMode::DisplayMode0 => self.render_display_mode_0(),
+            DisplayMode::DisplayMode0 => self.render_display_mode_0(target),
             DisplayMode::DisplayMode1 => todo!(),
-            DisplayMode::DisplayMode2 => self.render_display_mode_2(),
+            DisplayMode::DisplayMode2 => self.render_display_mode_2(target),
             DisplayMode::DisplayMode3 => todo!(),
             DisplayMode::DisplayMode4 => todo!(),
             DisplayMode::DisplayMode5 => todo!(),
         }
-        self.render_objs();
-
-        self.last_rendered_line = self.memory_interface.vertical_count.min(160);
+        self.render_objs(target);
     }
 
-    fn render_objs(&mut self) {
+    fn render_objs(&self, target: &mut RenderTarget<'_>) {
         let screen_display_obj = (self.memory_interface.display_control & 0x1000) > 0;
         if !screen_display_obj {
             return;
@@ -330,16 +359,14 @@ impl Lcd {
             self.memory_interface.vertical_count.min(160),
         ) {
             for screen_x in 0..240 {
-                for color in objs.iter().filter_map(|o| {
-                    o.color_at(
-                        screen_x,
-                        screen_y,
-                        &self.vram.lock().unwrap(),
-                        &self.color_ram.lock().unwrap(),
-                    )
+                for (color, palette) in objs.iter().filter_map(|o| {
+                    let vram = self.vram.lock().unwrap();
+                    Some((
+                        o.color_at(screen_x, screen_y, &vram, &self.color_ram.lock().unwrap())?,
+                        o.palette_index_at(screen_x, screen_y, &vram)?,
+                    ))
                 }) {
-                    let buffer_index = screen_y * 240 + screen_x;
-                    self.buffer[buffer_index as usize] = color.to_rgb();
+                    target.set(screen_x, screen_y, color, palette);
                 }
             }
         }
@@ -347,16 +374,15 @@ impl Lcd {
         // todo!()
     }
 
-    fn render_display_mode_0(&mut self) {
+    fn render_display_mode_0(&self, target: &mut RenderTarget<'_>) {
         let background_color = self.color_ram.lock().unwrap().read_half_word(0x5000000);
-        let background_color = Color::from_raw(background_color).to_rgb();
+        let background_color = Color::from_raw(background_color);
         for screen_y in vert_lines(
             self.last_rendered_line,
             self.memory_interface.vertical_count.min(160),
         ) {
             for screen_x in 0..240 {
-                let buffer_index = screen_y as usize * 240 + screen_x;
-                self.buffer[buffer_index] = background_color;
+                target.set(screen_x, screen_y, background_color, 0);
             }
         }
         for priority in 0..4 {
@@ -372,21 +398,20 @@ impl Lcd {
                 if !screen_display_bg {
                     continue;
                 }
-                self.render_background_regular(background);
+                self.render_background_regular(background, target);
             }
         }
     }
 
-    fn render_display_mode_2(&mut self) {
+    fn render_display_mode_2(&self, target: &mut RenderTarget<'_>) {
         let background_color = self.color_ram.lock().unwrap().read_half_word(0x5000000);
-        let background_color = Color::from_raw(background_color).to_rgb();
+        let background_color = Color::from_raw(background_color);
         for screen_y in vert_lines(
             self.last_rendered_line,
             self.memory_interface.vertical_count.min(160),
         ) {
             for screen_x in 0..240 {
-                let buffer_index = screen_y as usize * 240 + screen_x;
-                self.buffer[buffer_index] = background_color;
+                target.set(screen_x, screen_y, background_color, 0);
             }
         }
         for priority in 0..4 {
@@ -402,12 +427,12 @@ impl Lcd {
                 if !screen_display_bg {
                     continue;
                 }
-                self.render_background_regular(background);
+                self.render_background_regular(background, target);
             }
         }
     }
 
-    fn render_background_regular(&mut self, background: usize) {
+    fn render_background_regular(&self, background: usize, target: &mut RenderTarget<'_>) {
         let horizontal_offset = self.memory_interface.background_x_offset[background] as u32;
         let vertical_offset = self.memory_interface.background_y_offset[background] as u32;
         let tileset_base = self.memory_interface.background_control[background].char_block();
@@ -475,8 +500,7 @@ impl Lcd {
                     let Some(color) = self.get_palette_color(index, palette_bank, 0) else {
                         continue;
                     };
-                    let buffer_index = screen_y * 240 + screen_x;
-                    self.buffer[buffer_index as usize] = color.to_rgb();
+                    target.set(screen_x as u16, screen_y as u16, color, index);
                     if 240 == screen_x {
                         return;
                     }
@@ -516,6 +540,17 @@ impl Lcd {
         };
         self.last_fetched_line = self.memory_interface.vertical_count.min(159);
         buffer[start_index..end_index].copy_from_slice(&self.buffer[start_index..end_index]);
+    }
+
+    pub fn get_buffer_raw(&mut self, buffer: &mut [u8; 160 * 240]) {
+        let target = &mut RenderTarget::PaletteIndex(buffer);
+        let lrl = self.last_rendered_line;
+        self.last_rendered_line = 0;
+        let vc = self.memory_interface.vertical_count;
+        self.memory_interface.vertical_count = 160;
+        self.render(target);
+        self.last_rendered_line = lrl;
+        self.memory_interface.vertical_count = vc;
     }
 
     pub(crate) fn load_palette(&self) -> Vec<u32> {
