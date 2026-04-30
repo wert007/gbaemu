@@ -48,6 +48,10 @@ impl GbaIo {
         self.lcd.load_tiles(format)
     }
 
+    pub fn load_tiles_obj(&self, format: PixelFormat) -> Vec<Vec<u8>> {
+        self.lcd.load_tiles_obj(format)
+    }
+
     pub fn load_palette(&self) -> Vec<u32> {
         self.lcd.load_palette()
     }

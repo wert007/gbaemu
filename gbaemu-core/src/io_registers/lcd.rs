@@ -548,6 +548,26 @@ impl Lcd {
         // tiles
     }
 
+    pub(crate) fn load_tiles_obj(&self, format: PixelFormat) -> Vec<Vec<u8>> {
+        let vram = self.vram.lock().unwrap();
+        let bytes = &vram.as_bytes()[0x00200..];
+        match format {
+            PixelFormat::Bpp4 => {
+                bytes
+                    .chunks_exact(8 * 8 / 2)
+                    .map(|b| {
+                        b.into_iter()
+                            .flat_map(|b| [b & 0xf0 >> 4, b & 0xf])
+                            // .flat_map(|b| [b & 0xf, b & 0xf0 >> 4])
+                            .collect::<Vec<u8>>()
+                    })
+                    .collect()
+            }
+            PixelFormat::Bpp8 => bytes.chunks_exact(8 * 8).map(|b| b.to_vec()).collect(),
+        }
+        // tiles
+    }
+
     fn collect_objs(&self) -> Vec<Obj> {
         self.obj_ram
             .lock()

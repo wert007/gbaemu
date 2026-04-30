@@ -371,7 +371,7 @@ fn load_tile_data(
     use_palette: Option<usize>,
     format: PixelFormat,
 ) -> Vec<u32> {
-    let tiles = gba.lock().unwrap().load_tiles(format);
+    let tiles = gba.lock().unwrap().load_tiles_obj(format);
     const FALLBACK: [u32; 16] = [
         0x000000u32,
         0xff0000u32,
