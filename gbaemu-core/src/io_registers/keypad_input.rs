@@ -40,4 +40,6 @@ impl MemoryPlugin for KeypadInput {
             _ => unreachable!("Implement write ({byte:x}) for {relative_address:x}"),
         }
     }
+
+    fn reset(&mut self) {}
 }

@@ -3,6 +3,7 @@ pub use debug_symbols::*;
 mod debug_symbols;
 
 pub mod debugger;
+pub mod function_watcher;
 
 use crate::{
     GbaArgs,

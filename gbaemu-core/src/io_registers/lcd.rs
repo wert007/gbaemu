@@ -604,6 +604,11 @@ fn dump_palette(background: usize, palette: &[u8]) {
 }
 
 impl MemoryPlugin for Lcd {
+    fn reset(&mut self) {
+        self.memory_interface.reset();
+        self.last_fetched_line = 0;
+        self.last_rendered_line = 0;
+    }
     fn claims_address(&self, address: usize) -> bool {
         (0x4000000..0x4000060).contains(&address)
     }
@@ -618,6 +623,9 @@ impl MemoryPlugin for Lcd {
 }
 
 impl MemoryPlugin for LcdMemoryInterface {
+    fn reset(&mut self) {
+        *self = Default::default();
+    }
     fn claims_address(&self, address: usize) -> bool {
         (0x4000000..0x4000060).contains(&address)
     }

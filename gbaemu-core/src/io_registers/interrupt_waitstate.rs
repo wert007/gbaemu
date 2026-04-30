@@ -109,6 +109,10 @@ impl MemoryPlugin for InterruptWaitstate {
         (0x4000200..=0x4700000).contains(&address)
     }
 
+    fn reset(&mut self) {
+        *self = Default::default();
+    }
+
     fn read_byte(&self, address: usize) -> u8 {
         let relative_address = address & !0x4000000;
         match relative_address {

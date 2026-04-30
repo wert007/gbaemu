@@ -54,6 +54,9 @@ impl Sound {
 }
 
 impl MemoryPlugin for Sound {
+    fn reset(&mut self) {
+        *self = Default::default();
+    }
     fn claims_address(&self, address: usize) -> bool {
         (0x4000060..0x40000B0).contains(&address)
     }

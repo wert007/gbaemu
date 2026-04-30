@@ -66,10 +66,13 @@ impl MemoryPlugin for Cartridge {
         let relative_address = address & !0x08000000;
         self.raw[relative_address] = byte;
     }
+
+    fn reset(&mut self) {}
 }
 
 #[derive(Debug, Default, Clone)]
 pub struct GbaArgs {
+    pub trace_functions: bool,
     // pub silent: bool,
     pub watch_stack: bool,
     pub log_file: Option<PathBuf>,
@@ -257,6 +260,11 @@ impl Gba {
 
     pub fn clone_gba_io(&self) -> Arc<Mutex<GbaIo>> {
         self.gba_io.clone()
+    }
+
+    pub fn reset(&mut self) {
+        self.registers = Registers::new();
+        self.gba_io.lock().unwrap().reset();
     }
 
     pub fn swap_buffers(&self, buffer: &mut [u32; 160 * 240]) {

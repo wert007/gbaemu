@@ -31,6 +31,8 @@ fn parse_hex_u32(s: &str) -> Result<u32, String> {
 struct GbaEmuArgs {
     #[clap(short, long)]
     silent: bool,
+    #[clap(short = 'f', long)]
+    trace_functions: bool,
     #[clap(long)]
     stack: bool,
     #[clap(short, long, default_value = "")]
@@ -50,6 +52,7 @@ struct GbaEmuArgs {
 impl Into<GbaArgs> for GbaEmuArgs {
     fn into(self) -> GbaArgs {
         GbaArgs {
+            trace_functions: self.trace_functions,
             log_file: self.log_file,
             watch_stack: self.stack,
             watch_registers: RegisterList::from_registers(
@@ -85,6 +88,8 @@ fn main() {
         )
     };
     let mut gba = Gba::new(game).with_args(args.clone());
+    let fw = FunctionWatcher::default();
+    #[allow(unused_mut)]
     let mut debugger = Debugger::new(args.silent);
     _ = debugger
     .skip_function("abs")
@@ -180,7 +185,7 @@ fn main() {
     // .with_watch_memory_address(0x4000090, 16)
     // .with_watch_memory_address(0x40000a0, 8)
     ;
-    gba.with_plugin(debugger);
+    gba.with_plugin(debugger).with_plugin(fw);
     let gba = Arc::new(Mutex::new(gba));
     let is_running = Arc::new(AtomicBool::new(true));
     let core = {
@@ -318,6 +323,9 @@ fn main() {
             gba.lock().unwrap().swap_buffers(&mut buffer);
             if window.is_key_down(minifb::Key::S) {
                 make_screenshot(&buffer, 240, 160, None);
+            }
+            if window.is_key_down(minifb::Key::R) {
+                gba.lock().unwrap().reset();
             }
             window.update_with_buffer(&buffer, 240, 160).unwrap();
         }

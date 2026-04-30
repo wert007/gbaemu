@@ -13,6 +13,9 @@ struct SingleTimer {
 }
 
 impl MemoryPlugin for SingleTimer {
+    fn reset(&mut self) {
+        *self = Default::default();
+    }
     fn claims_address(&self, address: usize) -> bool {
         (0x4000100..0x4000120).contains(&address)
     }
@@ -39,6 +42,9 @@ impl MemoryPlugin for SingleTimer {
 }
 
 impl MemoryPlugin for Timer {
+    fn reset(&mut self) {
+        *self = Default::default();
+    }
     fn claims_address(&self, address: usize) -> bool {
         (0x4000100..0x4000120).contains(&address)
     }

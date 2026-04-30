@@ -22,6 +22,7 @@ impl Dma {
 }
 
 impl MemoryPlugin for Dma {
+    fn reset(&mut self) {}
     fn claims_address(&self, address: usize) -> bool {
         (0x40000B0..0x4000100).contains(&address)
     }
@@ -63,6 +64,7 @@ impl DmaChannel {
 }
 
 impl MemoryPlugin for DmaChannel {
+    fn reset(&mut self) {}
     fn claims_address(&self, address: usize) -> bool {
         (0x40000B0..0x4000100).contains(&address)
     }

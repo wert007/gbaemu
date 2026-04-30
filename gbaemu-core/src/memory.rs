@@ -26,6 +26,8 @@ impl MemoryPlugin for SimpleMemory {
         (self.start..self.start + self.data.len()).contains(&address)
     }
 
+    fn reset(&mut self) {}
+
     fn read_byte(&self, address: usize) -> u8 {
         self.data[address - self.start]
     }
@@ -37,6 +39,7 @@ impl MemoryPlugin for SimpleMemory {
 
 pub trait MemoryPlugin {
     fn claims_address(&self, address: usize) -> bool;
+    fn reset(&mut self);
     fn read_slice(&self, address: usize, length: usize) -> Vec<u8> {
         (address..(address + length))
             .map(|a| self.read_byte(a))
@@ -79,6 +82,10 @@ impl<T: MemoryPlugin> MemoryPlugin for Arc<Mutex<T>> {
     fn write_byte(&mut self, address: usize, byte: u8) {
         self.lock().unwrap().write_byte(address, byte);
     }
+
+    fn reset(&mut self) {
+        self.lock().unwrap().reset();
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,6 +122,12 @@ impl Memory {
             plugins: Vec::new(),
             memory_watcher: Default::default(),
         }
+    }
+
+    pub fn reset(&mut self) {
+        self.raw = vec![0; 0x0FFFFFFF];
+        self.ip = 0;
+        self.plugins.iter_mut().for_each(|p| p.reset());
     }
 
     pub fn add_plugin<Plugin: MemoryPlugin + Send + 'static>(&mut self, plugin: Plugin) {

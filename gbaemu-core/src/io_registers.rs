@@ -40,6 +40,10 @@ impl GbaIo {
         }
     }
 
+    pub fn reset(&mut self) {
+        self.interrupt = Default::default();
+    }
+
     pub fn load_tiles(&self, format: PixelFormat) -> Vec<Vec<u8>> {
         self.lcd.load_tiles(format)
     }
@@ -122,6 +126,10 @@ impl MemoryPlugin for GbaIo {
         self.find_for_address_mut(address)
             .map(|p| p.write_byte(address, byte))
             .expect("Invalid address")
+    }
+
+    fn reset(&mut self) {
+        self.reset();
     }
 }
 

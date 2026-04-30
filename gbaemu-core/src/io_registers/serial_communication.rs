@@ -86,6 +86,9 @@ impl Debug for SerialCommunication {
 }
 
 impl MemoryPlugin for SerialCommunication {
+    fn reset(&mut self) {
+        *self = Default::default();
+    }
     fn claims_address(&self, address: usize) -> bool {
         (0x4000120..0x4000130).contains(&address) || (0x4000134..0x4000200).contains(&address)
     }
