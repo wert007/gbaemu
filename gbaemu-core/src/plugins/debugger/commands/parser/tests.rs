@@ -1,13 +1,17 @@
 use super::*;
-use crate::plugins::debugger::commands::Command;
+use crate::{memory::Memory, plugins::debugger::commands::Command};
 fn p(t: &str) -> Result<Command, ()> {
-    parse_command(t.to_string())
+    parse_command(t.to_string(), Registers::default())
 }
 
 #[test]
 fn parse_tests() {
     expect_echo(p("123"), "123");
     expect_read_memory(p("[123]"), 123);
+    assert_eq!(
+        p("[123]=1"),
+        Ok(Command::WriteMemory(Address::Literal(123), 1))
+    );
     assert_eq!(p("b"), Ok(Command::GoBack));
 }
 
@@ -26,8 +30,5 @@ fn expect_read_memory(p: Result<Command, ()>, arg: u32) {
         Command::ReadMemory(e) => e,
         c => panic!("Command {c:?} was not echo!"),
     };
-    match e {
-        Address::Indirect(u) | Address::Literal(u) => assert_eq!(u, arg),
-        Address::Register(register_index) => todo!(),
-    }
+    assert_eq!(e.resolve(Registers::default(), &Memory::new()), arg);
 }

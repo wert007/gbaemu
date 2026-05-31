@@ -1,4 +1,12 @@
-use crate::plugins::debugger::commands::{Address, Command};
+use std::{
+    cell::RefCell,
+    sync::atomic::{AtomicUsize, Ordering::SeqCst},
+};
+
+use crate::{
+    plugins::debugger::commands::{Address, Command},
+    registers::{RegisterIndex, Registers},
+};
 
 #[cfg(test)]
 mod tests;
@@ -7,10 +15,29 @@ mod tests;
 pub enum Token {
     Text(String),
     Int(u32),
+    Register(RegisterIndex),
+    Equals,
     LBracket,
     RBracket,
     Error,
     Eof,
+}
+impl Token {
+    fn text(t: &str) -> Token {
+        if let Ok(r) = RegisterIndex::try_from(t.to_uppercase().as_str()) {
+            Token::Register(r)
+        } else {
+            Token::Text(t.to_string())
+        }
+    }
+
+    fn as_u32(&self, registers: Registers) -> Option<u32> {
+        match self {
+            Token::Int(u) => Some(*u),
+            Token::Register(r) => Some(registers.read(*r)),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -37,20 +64,20 @@ impl Parser {
 
 enum Ast {
     Literal(u32),
+    Register(RegisterIndex),
     MemoryRead(Box<Ast>),
 }
 impl Ast {
     fn expect_address(self) -> Result<Address, ()> {
         match self {
             Ast::Literal(u) => Ok(Address::Literal(u)),
-            Ast::MemoryRead(ast) => {
-                todo!()
-            }
+            Ast::Register(r) => Ok(Address::Register(r)),
+            Ast::MemoryRead(ast) => Ok(Address::Indirect(Box::new(ast.expect_address()?))),
         }
     }
 }
 
-pub fn parse_command(text: String) -> Result<Command, ()> {
+pub fn parse_command(text: String, registers: Registers) -> Result<Command, ()> {
     let mut p = Parser::new(text);
     match p.peek() {
         Token::Text(c) => parse_named_command(&c.clone(), p),
@@ -60,9 +87,18 @@ pub fn parse_command(text: String) -> Result<Command, ()> {
             let ast = parse_expression(&mut p)?;
             match ast {
                 Ast::Literal(u) => Ok(Command::Echo(u.to_string())),
+                Ast::Register(r) => Ok(Command::Echo(registers.read(r).to_string())),
                 Ast::MemoryRead(ast) => {
                     let addr = ast.expect_address()?;
-                    Ok(Command::ReadMemory(addr))
+                    if p.peek() == &Token::Equals {
+                        p.eat();
+                        let Some(v) = p.eat().as_u32(registers) else {
+                            return Err(());
+                        };
+                        Ok(Command::WriteMemory(addr, v))
+                    } else {
+                        Ok(Command::ReadMemory(addr))
+                    }
                 }
             }
         }
@@ -72,6 +108,7 @@ pub fn parse_command(text: String) -> Result<Command, ()> {
 fn parse_expression(p: &mut Parser) -> Result<Ast, ()> {
     match p.eat() {
         Token::Int(u) => Ok(Ast::Literal(u)),
+        Token::Register(r) => Ok(Ast::Register(r)),
         Token::LBracket => {
             let addr = parse_expression(p)?;
             if p.eat() != Token::RBracket {
@@ -79,7 +116,7 @@ fn parse_expression(p: &mut Parser) -> Result<Ast, ()> {
             }
             Ok(Ast::MemoryRead(Box::new(addr)))
         }
-        Token::Text(_) | Token::RBracket | Token::Error | Token::Eof => Err(()),
+        Token::Text(_) | Token::RBracket | Token::Equals | Token::Error | Token::Eof => Err(()),
     }
 }
 
@@ -94,113 +131,99 @@ fn parse_named_command(c: &str, p: Parser) -> Result<Command, ()> {
         "show-asm" => Ok(Command::StartEmittingAssembly),
         "hide-asm" => Ok(Command::StopEmittingAssembly),
         "n" | "next" | "step" | "s" => Ok(Command::Step),
-        hmm => todo!("{hmm}"),
+        _ => Err(()),
     }
 }
 
 pub fn parse_tokens(text: String) -> Vec<Token> {
-    let mut result = Vec::new();
-    let mut is_int = false;
-    let mut is_hex = false;
-    let mut is_text = false;
-    let mut last_multi_char_token_start = 0;
+    #[derive(Debug, PartialEq, Eq, Clone, Copy, strum::EnumIs)]
+    enum State {
+        Int,
+        Hex,
+        Text,
+        None,
+    }
+    let result = RefCell::new(Vec::new());
+    let state = RefCell::new(State::None);
+    let last_multi_char_token_start = AtomicUsize::new(0);
+    let finish = |i| {
+        let last_multi_char_token_start =
+            last_multi_char_token_start.load(std::sync::atomic::Ordering::SeqCst);
+        if state.borrow().is_text() {
+            result
+                .borrow_mut()
+                .push(Token::text(&text[last_multi_char_token_start..i]));
+        } else if state.borrow().is_int() || state.borrow().is_hex() {
+            let radix = if state.borrow().is_hex() { 16 } else { 10 };
+            result.borrow_mut().push(
+                u32::from_str_radix(
+                    &text[last_multi_char_token_start..i].trim_start_matches("0x"),
+                    radix,
+                )
+                .map(|u| Token::Int(u))
+                .unwrap_or(Token::Error),
+            );
+        } else {
+            *state.borrow_mut() = State::None;
+
+            return false;
+        }
+        *state.borrow_mut() = State::None;
+
+        true
+    };
+    let is_int = || state.borrow().is_int();
+    let is_hex = || state.borrow().is_hex();
     for (i, ch) in text.char_indices() {
         match ch {
             '[' => {
-                if is_text {
-                    result.push(Token::Text(
-                        text[last_multi_char_token_start..i].to_string(),
-                    ));
-                } else if is_int || is_hex {
-                    let radix = if is_hex { 16 } else { 10 };
-                    result.push(
-                        u32::from_str_radix(
-                            &text[last_multi_char_token_start..i].trim_start_matches("0x"),
-                            radix,
-                        )
-                        .map(|u| Token::Int(u))
-                        .unwrap_or(Token::Error),
-                    );
-                }
-                result.push(Token::LBracket)
+                finish(i);
+                result.borrow_mut().push(Token::LBracket)
             }
             ']' => {
-                if is_text {
-                    result.push(Token::Text(
-                        text[last_multi_char_token_start..i].to_string(),
-                    ));
-                } else if is_int || is_hex {
-                    let radix = if is_hex { 16 } else { 10 };
-                    result.push(
-                        u32::from_str_radix(
-                            &text[last_multi_char_token_start..i].trim_start_matches("0x"),
-                            radix,
-                        )
-                        .map(|u| Token::Int(u))
-                        .unwrap_or(Token::Error),
-                    );
-                }
-
-                result.push(Token::RBracket)
+                finish(i);
+                result.borrow_mut().push(Token::RBracket)
+            }
+            '=' => {
+                finish(i);
+                result.borrow_mut().push(Token::Equals)
             }
             ws if ws.is_whitespace() => {}
-            d if !is_text && d.is_ascii_digit() => {
-                if is_int || is_hex {
+            d if !state.borrow().is_text() && d.is_ascii_digit() => {
+                if is_int() || is_hex() {
                 } else {
-                    last_multi_char_token_start = i;
-                    is_int = true;
+                    last_multi_char_token_start.store(i, SeqCst);
+                    *state.borrow_mut() = State::Int;
                 }
             }
-            d if is_text && d.is_ascii_digit() => {}
-            '_' | '?' if is_text => {}
-            'x' if !is_text && is_int && &text[last_multi_char_token_start..i + 1] == "0x" => {
-                is_int = false;
-                is_hex = true;
-            }
-            xd if xd.is_ascii_hexdigit() && is_hex => {}
-            a if a.is_alphabetic() && !is_int && !is_hex
-                || a == '-' && is_text
-                || a == '?' && !is_text && !is_int && !is_hex =>
+            d if state.borrow().is_text() && d.is_ascii_digit() => {}
+            '_' | '?' if state.borrow().is_text() => {}
+            'x' if !state.borrow().is_text()
+                && is_int()
+                && &text[last_multi_char_token_start.load(std::sync::atomic::Ordering::SeqCst)
+                    ..i + 1]
+                    == "0x" =>
             {
-                if is_text {
+                *state.borrow_mut() = State::Hex;
+            }
+            xd if xd.is_ascii_hexdigit() && is_hex() => {}
+            a if a.is_alphabetic() && !is_int() && !is_hex()
+                || a == '-' && state.borrow().is_text()
+                || a == '?' && !state.borrow().is_text() && !is_int() && !is_hex() =>
+            {
+                if state.borrow().is_text() {
                 } else {
-                    last_multi_char_token_start = i;
-                    is_text = true;
+                    last_multi_char_token_start.store(i, SeqCst);
+                    *state.borrow_mut() = State::Text;
                 }
             }
             c => {
-                if is_text && c.is_whitespace() {
-                    result.push(Token::Text(
-                        text[last_multi_char_token_start..i].to_string(),
-                    ));
-                } else if is_int || is_hex {
-                    let radix = if is_hex { 16 } else { 10 };
-                    result.push(
-                        u32::from_str_radix(&text[last_multi_char_token_start..i], radix)
-                            .map(|u| Token::Int(u))
-                            .unwrap_or(Token::Error),
-                    );
-                    match c {
-                        '[' => result.push(Token::LBracket),
-                        ']' => result.push(Token::RBracket),
-                        ws if ws.is_whitespace() => {}
-                        _ => todo!("{c}"),
-                    }
-                } else {
-                    result.push(Token::Error);
+                if !finish(i) {
+                    result.borrow_mut().push(Token::Error);
                 }
             }
         }
     }
-    if is_text {
-        result.push(Token::Text(text[last_multi_char_token_start..].to_string()));
-    } else if is_int || is_hex {
-        let radix = if is_hex { 16 } else { 10 };
-        result.push(
-            u32::from_str_radix(&text[last_multi_char_token_start..], radix)
-                .map(|u| Token::Int(u))
-                .unwrap_or(Token::Error),
-        );
-    }
-    result
+    finish(text.len());
+    result.take()
 }

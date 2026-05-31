@@ -64,7 +64,7 @@ impl PluginWishes {
 
 pub trait Plugin: Send {
     fn with_args(&mut self, args: GbaArgs);
-    fn interrupt_occured(&mut self, interrupt: Interrupt) -> Option<PluginWishes> {
+    fn interrupt_occured(&mut self, _interrupt: Interrupt) -> Option<PluginWishes> {
         None
     }
     fn should_execute(
@@ -73,7 +73,7 @@ pub trait Plugin: Send {
         _mode: Mode,
         _instruction: &Instruction,
         _ip: u32,
-        _memory: &Memory,
+        _memory: &mut Memory,
     ) -> PluginWishes {
         PluginWishes::default()
     }

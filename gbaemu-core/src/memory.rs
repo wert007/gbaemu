@@ -396,13 +396,9 @@ impl Memory {
         }
     }
 
-    fn is_read_only(&self, address: u32, size: u32) -> bool {
+    pub fn is_read_only(&self, address: u32, size: u32) -> bool {
         (0x00000000..=0x00003FFF).contains(&address)
-            && if size > 1 {
-                self.is_read_only(address + 1, size - 1)
-            } else {
-                true
-            }
+            || (0x00000000..=0x00003FFF).contains(&(address + size))
     }
 
     fn handle_mirrors(&self, address: usize) -> Result<usize, MemoryProtection> {

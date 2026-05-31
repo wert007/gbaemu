@@ -1,9 +1,6 @@
 use std::collections::VecDeque;
 
-use crate::{
-    instructions::{Instruction, display::DisplayContext},
-    registers::{RegisterIndex, RegisterList, Registers},
-};
+use crate::{instructions::Instruction, registers::Registers};
 
 pub struct InstructionReversionBuilder {
     ip: u32,

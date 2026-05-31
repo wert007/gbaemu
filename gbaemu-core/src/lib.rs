@@ -191,7 +191,7 @@ impl Gba {
         let plugin_wishes = self
             .plugins
             .iter_mut()
-            .map(|p| p.should_execute(&registers, mode, &instruction, ip, &self.memory))
+            .map(|p| p.should_execute(&registers, mode, &instruction, ip, &mut self.memory))
             .fold(plugins::PluginWishes::default(), |acc, cur| {
                 acc.combined_with(cur)
             });

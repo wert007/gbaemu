@@ -428,7 +428,7 @@ impl Plugin for Debugger {
         _mode: Mode,
         instruction: &Instruction,
         ip: u32,
-        memory: &Memory,
+        memory: &mut Memory,
     ) -> PluginWishes {
         self.registers = *registers;
         self.history
@@ -473,12 +473,15 @@ impl Plugin for Debugger {
         let mut line = String::new();
         println!("Press [c] to continue");
         std::io::stdin().read_line(&mut line).unwrap();
-        let cmd = Command::parse(line.to_lowercase().trim());
+        let cmd = Command::parse(line.to_lowercase().trim(), *registers);
         match cmd {
             Ok(cmd) => cmd.execute(self, *registers, ip, memory),
             Err(()) => {
                 println!("Failed parsing command..");
-                PluginWishes::default()
+                PluginWishes {
+                    pause_execution: true,
+                    ..Default::default()
+                }
             }
         }
     }

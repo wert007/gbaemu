@@ -38,15 +38,15 @@ pub enum Command {
     #[strum_discriminants(strum(message = "[ADDR] - Read Memory value at address."))]
     ReadMemory(Address),
     #[strum_discriminants(strum(message = "[ADDR]=VALUE - Write value to memory address."))]
-    WriteMemory(Address),
+    WriteMemory(Address, u32),
     #[strum_discriminants(strum(message = "?/h/help - Emits this help."))]
     Help,
     Echo(String),
 }
 
 impl Command {
-    pub fn parse(cmd: &str) -> Result<Command, ()> {
-        parser::parse_command(cmd.to_string())
+    pub fn parse(cmd: &str, registers: Registers) -> Result<Command, ()> {
+        parser::parse_command(cmd.to_string(), registers)
     }
 
     pub(crate) fn execute(
@@ -54,7 +54,7 @@ impl Command {
         debugger: &mut super::Debugger,
         registers: Registers,
         ip: u32,
-        memory: &Memory,
+        memory: &mut Memory,
     ) -> PluginWishes {
         let mut pause_execution = true;
         let mut register_changes = [None; 18];
@@ -107,7 +107,14 @@ impl Command {
                 let address = address.resolve(registers, memory);
                 eprintln!("[{}] = {:#x}", address, memory.read_word_silent(address));
             }
-            Command::WriteMemory(address) => todo!(),
+            Command::WriteMemory(address, v) => {
+                let address = address.resolve(registers, memory);
+                if memory.is_read_only(address, 4) {
+                    eprintln!("Address {address:x} is read only and cannot be changed.");
+                } else {
+                    memory.write_word_to(address, *v);
+                }
+            }
             Command::Help => {
                 eprintln!(
                     "ADDR or VALUE can be written as hex (0xaf123) or decimal (1921). You can also use registers (R6 or r6 or sp) or memory locations"
