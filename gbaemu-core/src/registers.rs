@@ -3,9 +3,12 @@ use std::fmt::{Debug, Display};
 use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
 
-use crate::instructions::{
-    InstructionFlags,
-    display::{DisplayContext, DisplayedRegisterIndex, DisplayedRegisterList},
+use crate::{
+    Error,
+    instructions::{
+        InstructionFlags, StoreLoadManyAddressingMode,
+        display::{DisplayContext, DisplayedRegisterIndex, DisplayedRegisterList},
+    },
 };
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -40,18 +43,18 @@ impl Registers {
 
     pub fn read(&self, register: RegisterIndex) -> u32 {
         self.read_raw(register)
-            + if register == RegisterIndex::Ip {
+            .wrapping_add(if register == RegisterIndex::Ip {
                 if self.cpsr().is_thumb() { 4 } else { 8 }
             } else {
                 0
-            }
+            })
     }
 
     fn register_bank(&self, register: RegisterIndex) -> usize {
         if register == RegisterIndex::Cpsr || register == RegisterIndex::Ip {
             0
         } else {
-            self.cpsr().mode().index(register)
+            self.cpsr().mode().map(|m| m.index(register)).unwrap_or(0)
         }
     }
 
@@ -146,11 +149,15 @@ impl Registers {
         self.write(reg, value);
         self
     }
+
+    pub(crate) fn read_values_to_array(&self) -> [u32; 18] {
+        std::array::from_fn(|i| self.read_raw(RegisterIndex::try_from(i as u32).unwrap()))
+    }
 }
 
 impl Debug for Registers {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mode = self.cpsr().mode();
+        let mode = self.cpsr().mode().unwrap();
         for (index, register) in RegisterIndex::iter().enumerate() {
             write!(
                 f,
@@ -195,9 +202,9 @@ impl PsrRegister {
         self.0 & 0x20 > 0
     }
 
-    pub fn mode(&self) -> Mode {
+    pub fn mode(&self) -> Result<Mode, Error> {
         let raw_mode = self.0 & 0x1f;
-        match raw_mode {
+        Ok(match raw_mode {
             0b10000 => Mode::User,
             0b10001 => Mode::Fiq,
             0b10010 => Mode::Irq,
@@ -205,8 +212,8 @@ impl PsrRegister {
             0b10111 => Mode::Abort,
             0b11011 => Mode::Undefined,
             0b11111 => Mode::System,
-            _ => unreachable!("Invalid mode found: {raw_mode:05b}"),
-        }
+            _ => return Err(Error::InvalidMode(raw_mode)),
+        })
     }
 }
 
@@ -311,10 +318,15 @@ impl RegisterList {
         self.len() * 4
     }
 
-    pub fn display(&self, ctx: DisplayContext) -> DisplayedRegisterList {
+    pub fn display(
+        &self,
+        ctx: DisplayContext,
+        adressing_mode: StoreLoadManyAddressingMode,
+    ) -> DisplayedRegisterList {
         DisplayedRegisterList {
             register_list: *self,
             ctx,
+            adressing_mode,
         }
     }
 

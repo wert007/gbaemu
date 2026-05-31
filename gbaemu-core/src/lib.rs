@@ -1,5 +1,4 @@
 use std::{
-    collections::VecDeque,
     io::{IsTerminal, Read},
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -11,7 +10,6 @@ use memory::{Memory, MemoryPlugin, SimpleMemory};
 use registers::{Mode, RegisterIndex, RegisterList, Registers};
 
 use crate::{
-    interrupts::Interrupt,
     io_registers::lcd::PixelFormat,
     plugins::{Plugin, PluginWishes},
 };
@@ -27,6 +25,11 @@ pub use crate::io_registers::lcd;
 
 #[cfg(test)]
 mod tests;
+
+#[derive(Debug)]
+pub enum Error {
+    InvalidMode(u32),
+}
 
 #[derive(Debug, Clone)]
 pub struct Cartridge {
@@ -166,17 +169,18 @@ impl Gba {
         self
     }
 
-    pub fn run_cycle(&mut self) {
+    pub fn run_cycle(&mut self) -> Result<(), Error> {
         while self.wait_ticks > 0 {
             self.ticks += 1;
             self.wait_ticks -= 1;
-            return;
+            self.gba_io.lock().unwrap().run_cycle(self.ticks);
+            return Ok(());
         }
         self.ticks += 1;
         let registers = self.registers;
         self.gba_io.lock().unwrap().run_cycle(self.ticks);
         self.handle_interrupts();
-        let mode = self.registers.cpsr().mode();
+        let mode = self.registers.cpsr().mode()?;
         let ip = self.registers.read_raw(RegisterIndex::Ip);
         let instruction = self.fetch().unwrap_or_else(|e| {
             // dbg!(self);
@@ -191,11 +195,13 @@ impl Gba {
             .fold(plugins::PluginWishes::default(), |acc, cur| {
                 acc.combined_with(cur)
             });
+        plugin_wishes.apply_register_changes(&mut self.registers);
+        plugin_wishes.apply_memory_changes(&mut self.memory);
         if plugin_wishes.pause_execution() {
             self.ticks -= 1;
             self.wait_ticks -= instruction.tick_duration(self.registers.flags());
             self.disable_interrupts_since_nothing_is_being_executed = !false;
-            return;
+            return Ok(());
         }
         self.disable_interrupts_since_nothing_is_being_executed = !true;
 
@@ -208,12 +214,14 @@ impl Gba {
         };
         instruction.execute(self);
         if !instruction.increments_instruction_pointer(self) {
-            self.registers.write(RegisterIndex::Ip, ip + increment);
+            self.registers
+                .write(RegisterIndex::Ip, ip.wrapping_add(increment));
         }
 
         for plugin in &mut self.plugins {
             plugin.after_executing(&self.registers, mode, &instruction, ip, &mut self.memory);
         }
+        Ok(())
     }
 
     fn fetch(&mut self) -> Result<Instruction, InstructionDecodeError> {

@@ -3,7 +3,10 @@ use display::{
     DisplayedStoreLoadMemoryAddress,
 };
 use shifter_operand::{ShiftOperator, ShifterOperand, ShifterOperandInstructionOp};
-use std::fmt::{Debug, Display};
+use std::{
+    fmt::{Debug, Display},
+    ops::Range,
+};
 use thiserror::Error;
 
 use crate::{
@@ -136,6 +139,7 @@ impl Display for Instruction {
                 is_tty: true,
                 register_values: Registers::new(),
                 use_register_values: false,
+                display_memory_offsets: true,
             })
         )
     }
@@ -193,6 +197,63 @@ impl Instruction {
             } else {
                 1
             }
+    }
+
+    pub(crate) fn accessed_memory_addresses(&self, registers: Registers) -> Option<Range<u32>> {
+        if !self.condition.can_execute(registers.flags()) {
+            return None;
+        }
+        match self.op {
+            InstructionOp::Branch { .. } => None,
+            InstructionOp::StoreOrLoadRegister {
+                is_load,
+                address,
+                read_size,
+                ..
+            } => {
+                if is_load {
+                    return None;
+                }
+                let size = match read_size {
+                    StoreLoadMemorySize::Byte => 1,
+                    StoreLoadMemorySize::SignedByte => 1,
+                    StoreLoadMemorySize::Halfword => 2,
+                    StoreLoadMemorySize::SignedHalfword => 2,
+                    StoreLoadMemorySize::Word => 4,
+                };
+                // assert!(!address.is_post_indexing);
+                let address = address.resolve_from_registers(registers);
+                Some(address..(address + size))
+            }
+            InstructionOp::StoreOrLoadRegisters {
+                is_load,
+                register_base,
+                register_list,
+                addressing_mode,
+                ..
+            } => {
+                if is_load {
+                    return None;
+                }
+                let size = register_list.len() * 4;
+                let mut address = registers.read(register_base);
+                if addressing_mode.does_change_before() {
+                    address = if addressing_mode.is_decreasing() {
+                        address - 4
+                    } else {
+                        address + 4
+                    };
+                }
+                Some(if addressing_mode.is_decreasing() {
+                    (address - size)..address
+                } else {
+                    address..(address + size)
+                })
+            }
+            InstructionOp::Mrs { .. } => None,
+            InstructionOp::Msr { .. } => None,
+            InstructionOp::ShifterOperandInstruction { .. } => None,
+        }
     }
 }
 
@@ -382,6 +443,32 @@ impl StoreLoadManyAddressingMode {
             }
         }
     }
+
+    fn offset_before(&self) -> i32 {
+        match self {
+            StoreLoadManyAddressingMode::IncrementBefore => 4,
+            StoreLoadManyAddressingMode::IncrementAfter => 0,
+            StoreLoadManyAddressingMode::DecrementBefore => -4,
+            StoreLoadManyAddressingMode::DecrementAfter => 0,
+        }
+    }
+
+    fn offset_after(&self) -> i32 {
+        match self {
+            StoreLoadManyAddressingMode::IncrementBefore => 0,
+            StoreLoadManyAddressingMode::IncrementAfter => 4,
+            StoreLoadManyAddressingMode::DecrementBefore => 0,
+            StoreLoadManyAddressingMode::DecrementAfter => -4,
+        }
+    }
+
+    fn is_decreasing(&self) -> bool {
+        matches!(self, Self::DecrementAfter | Self::DecrementBefore)
+    }
+
+    fn does_change_before(&self) -> bool {
+        matches!(self, Self::IncrementBefore | Self::DecrementBefore)
+    }
 }
 
 impl Display for StoreLoadManyAddressingMode {
@@ -425,6 +512,34 @@ impl StoreLoadMemoryAddress {
             };
             state.registers.write(self.register_base, address);
         }
+        address
+    }
+
+    fn resolve_from_registers(&self, registers: Registers) -> u32 {
+        let base = registers.read(self.register_base);
+        let base = if self.register_base == RegisterIndex::Ip && self.ignore_bit_1_of_pc {
+            base & !2
+        } else {
+            base
+        };
+        let address = if !self.is_post_indexing {
+            let offset = self.offset.resolve(&registers);
+            if self.negate_offset {
+                base.wrapping_sub(offset)
+            } else {
+                base.wrapping_add(offset)
+            }
+        } else {
+            base
+        };
+        // if self.is_post_indexing {
+        //     let offset = self.offset.resolve(&registers);
+        //     let address = if self.negate_offset {
+        //         address.wrapping_sub(offset)
+        //     } else {
+        //         address.wrapping_add(offset)
+        //     };
+        // }
         address
     }
 
@@ -741,20 +856,20 @@ impl InstructionOp {
                 if use_spsr {
                     let old_value = state.registers.read(RegisterIndex::Spsr);
 
-                    if state.registers.cpsr().mode().has_spsr() {
+                    if state.registers.cpsr().mode().unwrap().has_spsr() {
                         mask = field_mask.to_mask()
                             & (Gba::USER_MASK | Gba::PRIV_MASK | Gba::STATE_MASK);
                         state
                             .registers
                             .write(RegisterIndex::Spsr, (old_value & !mask) | (value & mask));
                     } else {
-                        dbg!(state.registers.cpsr().mode());
+                        _ = dbg!(state.registers.cpsr().mode());
                         todo!("UNPREDICTABLE")
                     }
                 } else {
                     let old_value = state.registers.read(RegisterIndex::Cpsr);
 
-                    if state.registers.cpsr().mode().is_privileged() {
+                    if state.registers.cpsr().mode().unwrap().is_privileged() {
                         if (value & Gba::STATE_MASK) > 0 {
                             todo!("UNPREDICTABLE")
                         } else {

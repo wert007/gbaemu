@@ -1,7 +1,6 @@
 use std::{
     collections::{BTreeMap, HashMap},
     fmt::Display,
-    net::IpAddr,
 };
 
 use gbaemu_core::{
@@ -27,10 +26,8 @@ impl Display for Instr {
         match self.instr.op {
             gbaemu_core::instructions::InstructionOp::Branch {
                 store_return_address_in_link_register,
-                return_address_is_thumb,
-                does_switch_mode,
                 target,
-                instruction_size,
+                ..
             } => match target {
                 gbaemu_core::instructions::BranchTarget::Offset(it) => {
                     let target = (self.ip as u32 + 4).wrapping_add_signed(it);
@@ -139,13 +136,8 @@ impl BasicBlockSuccessor {
             Program::Instr(instr) => {
                 let next_instr_ip = instr.ip as u32 + instr.instr.size as u32;
                 match instr.instr.op {
-                    gbaemu_core::instructions::InstructionOp::Branch {
-                        store_return_address_in_link_register,
-                        return_address_is_thumb,
-                        does_switch_mode,
-                        target,
-                        instruction_size,
-                    } => match target {
+                    gbaemu_core::instructions::InstructionOp::Branch { target, .. } => match target
+                    {
                         gbaemu_core::instructions::BranchTarget::Offset(it) => {
                             let target = (instr.ip as u32 + 4).wrapping_add_signed(it);
                             if instr.instr.condition == Condition::Always {

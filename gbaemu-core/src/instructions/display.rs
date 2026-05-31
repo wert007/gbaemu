@@ -1,10 +1,13 @@
-use crate::registers::{RegisterIndex, RegisterList, Registers};
+use crate::{
+    instructions::StoreLoadManyAddressingMode,
+    registers::{RegisterIndex, RegisterList, Registers},
+};
 use colorable::*;
 use std::fmt::Display;
 
 use super::{
-    shifter_operand::ShifterOperand, BranchTarget, Condition, Instruction, InstructionOp,
-    StoreLoadMemoryAddress,
+    BranchTarget, Condition, Instruction, InstructionOp, StoreLoadMemoryAddress,
+    shifter_operand::ShifterOperand,
 };
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -13,6 +16,7 @@ pub struct DisplayContext {
     pub is_tty: bool,
     pub register_values: Registers,
     pub use_register_values: bool,
+    pub display_memory_offsets: bool,
 }
 
 impl DisplayContext {
@@ -121,7 +125,7 @@ impl Display for DisplayedInstructionOp {
                 self.condition,
                 register_base.display(self.ctx),
                 if register_base_write_back { "!" } else { "" },
-                register_list.display(self.ctx),
+                register_list.display(self.ctx, addressing_mode),
             ),
             InstructionOp::Mrs {
                 use_spsr,
@@ -284,13 +288,24 @@ impl Display for DisplayedStoreLoadMemoryAddress {
 pub struct DisplayedRegisterList {
     pub register_list: RegisterList,
     pub ctx: DisplayContext,
+    pub adressing_mode: StoreLoadManyAddressingMode,
 }
 
 impl Display for DisplayedRegisterList {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{{")?;
+        let mut offset = if self.adressing_mode.is_decreasing() {
+            self.register_list.byte_len()
+        } else {
+            0
+        };
         for register in self.register_list {
+            if self.ctx.display_memory_offsets {
+                write!(f, "{offset:x}: ")?;
+                offset = offset.strict_add_signed(self.adressing_mode.offset_before());
+            }
             write!(f, "{}, ", register.display(self.ctx))?;
+            offset = offset.strict_add_signed(self.adressing_mode.offset_after());
         }
         write!(f, "}}")?;
         Ok(())

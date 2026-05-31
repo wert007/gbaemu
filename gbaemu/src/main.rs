@@ -1,10 +1,9 @@
 use clap::Parser;
 use gbaemu_core::{
-    interrupts::Interrupt,
     io_registers::GbaIo,
     lcd::PixelFormat,
     plugins::{debugger::Debugger, function_watcher::FunctionWatcher},
-    registers::{RegisterIndex, RegisterList, Registers},
+    registers::{RegisterIndex, RegisterList},
     Cartridge, Gba, GbaArgs,
 };
 use image::Rgba;
@@ -33,6 +32,8 @@ struct GbaEmuArgs {
     silent: bool,
     #[clap(short = 'f', long)]
     trace_functions: bool,
+    #[clap(short = 'c', long = "history", default_value = "100")]
+    history_length: usize,
     #[clap(long)]
     stack: bool,
     #[clap(short, long, default_value = "")]
@@ -67,7 +68,7 @@ impl Into<GbaArgs> for GbaEmuArgs {
 fn main() {
     let args = GbaEmuArgs::parse();
     dbg!(&args);
-    let game = Cartridge::new(BufReader::new(File::open("./assets/2048_jam.gba").unwrap()));
+    let game = Cartridge::new(BufReader::new(File::open("./assets/arm.gba").unwrap()));
     // let game = Cartridge::new(BufReader::new(File::open("./assets/2048_jam.gba").unwrap()));
     // gba.dump_bios();
     let mut window = if args.headless {
@@ -90,7 +91,7 @@ fn main() {
     let mut gba = Gba::new(game).with_args(args.clone());
     let fw = FunctionWatcher::default();
     #[allow(unused_mut)]
-    let mut debugger = Debugger::new(args.silent);
+    let mut debugger = Debugger::new(args.silent, args.history_length);
     _ = debugger
     .skip_function("abs")
     .skip_function("swi_VBlankIntrWait")
@@ -114,7 +115,7 @@ fn main() {
     .skip_function("reset_register_wert007")
     .skip_function("swi_HardReset")
     .skip_function("InitSystemStack")
-    .skip_function("jumptable")
+    // .skip_function("jumptable")
     .skip_function("some_parabolic_formulas_maybe_to_make_logos_jump_wert007")
     .skip_function("sub_2D68")
     .skip_function("enable_all_interrupts")
@@ -128,9 +129,10 @@ fn main() {
     .skip_function("swi_Div")
     .skip_function("swi_DivArm")
     .skip_function("swi_BiosChecksum")
-    .skip_function("bios_irq_handler")
-    .skip_function("irq_complete")
-    .skip_function("irq_vector")
+    // .skip_function("bios_irq_handler")
+    // .skip_function("irq_complete")
+    .skip_function("sub_2D70")
+    // .skip_function("irq_vector")
     // .emit_register_on(RegisterIndex::R1, 0x330)
     // .emit_register_on(RegisterIndex::R2, 0x378)
     // .emit_register_on(RegisterIndex::R1, 0x378)
@@ -138,8 +140,12 @@ fn main() {
     // .emit_register_on(RegisterIndex::Lr, 0x328)
     // .emit_register_on(RegisterIndex::R2, 0x364)
     // debugger
-    // .with_breakpoint(0x1c40 )
-    // .with_breakpoint(0x128)
+    .break_on_irq(gbaemu_core::interrupts::Interrupt::SerialCom)
+    // .emit_interrupt_names()
+    .panic_on(0xfffffffc)
+    .with_breakpoint(0x9FE2000)
+    .with_breakpoint(0x9FFC000)
+    // .with_breakpoint(0x00000378)
     // .with_breakpoint(0xaac)
     // .with_breakpoint(0x440)
     // .with_breakpoint_conditionally(0xbc8, |r: Registers| r.read(RegisterIndex::R1) == 0x6016c00)
@@ -157,9 +163,10 @@ fn main() {
     // .with_breakpoint(0x344)
     // // .with_breakpoint(0xb96)
     // .break_on_irq(Interrupt::SerialCom)
-    .with_watch_memory_address(0x04000128, 2, false, false, false)
-    .with_watch_memory_address(0x04000134, 2, false, false, false)
+    // .with_watch_memory_address(0x04000128, 2, false, false, false)
+    // .with_watch_memory_address(0x04000134, 2, false, false, false)
     // .with_watch_memory_address(0x3fffFF8, 2)
+    // .with_watch_memory_address(0x3007fa0, 4* 6, false, false, true)
     // .with_watch_memory_address(0x300001a, 1, false, true)
     // .with_watch_stack()
     // .with_watch_memory_address(0x60024e0, 0x20)
@@ -173,9 +180,10 @@ fn main() {
     // .with_watch_memory_address(0x4000120, 8)
     // .with_watch_memory_address(0x4000128, 1)
     // .with_watch_memory_address(0x400012a, 2)
-    // .with_watch_memory_address(0x4000200, 2)
-    // .with_watch_memory_address(0x4000202, 2)
-    // .with_watch_memory_address(0x4000208, 2)
+    // .with_watch_memory_address(0x4000200, 2, false, false, false, )
+    // .with_watch_memory_address(0x4000202, 2,false, false, false, )
+    .with_watch_memory_address(0x6000200, 1,true, false, false, )
+    // .with_watch_memory_address(0x4000208, 2,false, false, false, )
     // .with_watch_memory_address(0x4000068, 2)
     // .with_watch_memory_address(0x400006c, 2)
     // .with_watch_memory_address(0x4000070, 6)
@@ -194,7 +202,7 @@ fn main() {
         thread::spawn(move || {
             while is_running.load(std::sync::atomic::Ordering::Relaxed) {
                 for _ in 0..1000 {
-                    gba.lock().unwrap().run_cycle();
+                    gba.lock().unwrap().run_cycle().unwrap();
                 }
                 std::thread::sleep(Duration::from_nanos(1));
             }
@@ -272,18 +280,21 @@ fn main() {
             )
             .unwrap();
 
-            let mut buffer = load_tile_data(&gba, Some(17), PixelFormat::Bpp8);
+            let mut buffer;
+            //  = load_tile_data(&gba, Some(17), PixelFormat::Bpp8);
             while window.is_open() && is_running.load(std::sync::atomic::Ordering::Relaxed) {
-                buffer = if window.is_key_down(minifb::Key::F5) {
-                    load_tile_data(&gba, Some(17), PixelFormat::Bpp8)
-                } else {
-                    buffer
-                };
+                // buffer = if window.is_key_down(minifb::Key::F5) {
+                //     load_tile_data(&gba, Some(17), PixelFormat::Bpp8)
+                // } else {
+                //     buffer
+                // };
+                buffer = load_tile_data(&gba, Some(17), PixelFormat::Bpp8);
                 if window.is_key_down(minifb::Key::F5) {
                     make_screenshot(&buffer, 32 * 8, 32 * 8, Some("tileset".into()));
                 }
                 // buffer[4096 + 16] = 0xff8888;
                 window.update_with_buffer(&buffer, 32 * 8, 32 * 8).unwrap();
+                std::thread::sleep(Duration::from_millis(16));
             }
         })
     };

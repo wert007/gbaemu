@@ -51,7 +51,7 @@ impl SerialCommunication {
         }
     }
 
-    pub fn run_cycle(&mut self, tick: usize) -> Vec<Interrupt> {
+    pub fn run_cycle(&mut self, _tick: usize) -> Vec<Interrupt> {
         if self.just_finished_transmission {
             self.just_finished_transmission = false;
             vec![Interrupt::SerialCom]

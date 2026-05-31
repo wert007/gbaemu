@@ -262,7 +262,7 @@ impl Instruction {
                         ShifterOperandInstructionOp::Move
                     }
                     0x0E => ShifterOperandInstructionOp::BitClear,
-                    unknown_op_code_2 => {
+                    _ => {
                         return Err(InstructionDecodeError::UnknownArm(word));
                     }
                 };
@@ -324,7 +324,7 @@ impl Instruction {
             0b101 => thumb_op_code_101(half_word),
             0b110 => thumb_op_code_110(half_word),
             0b111 => thumb_op_code_111(half_word, next_half_word),
-            unknown_op_code_1 => Err(InstructionDecodeError::UnknownThumb(half_word)),
+            _ => Err(InstructionDecodeError::UnknownThumb(half_word)),
         }
     }
 }
@@ -537,7 +537,7 @@ fn thumb_op_code_101(half_word: u16) -> Result<Instruction, InstructionDecodeErr
                 },
             })
         }
-        err => Err(InstructionDecodeError::UnknownThumb(half_word)),
+        _ => Err(InstructionDecodeError::UnknownThumb(half_word)),
     }
 }
 
@@ -691,7 +691,7 @@ fn thumb_op_code_010(half_word: u16) -> Result<Instruction, InstructionDecodeErr
                     ShifterOperand::Register(rm),
                     rd,
                 ),
-                unknown_alu_op_code => {
+                _ => {
                     return Err(InstructionDecodeError::UnknownThumb(half_word));
                 }
             };
@@ -803,7 +803,7 @@ fn thumb_op_code_010(half_word: u16) -> Result<Instruction, InstructionDecodeErr
                         },
                     })
                 }
-                unknown => Err(InstructionDecodeError::UnknownThumb(half_word)),
+                _ => Err(InstructionDecodeError::UnknownThumb(half_word)),
             }
         }
         0b010 | 0b011 => {
@@ -903,7 +903,7 @@ fn thumb_op_code_010(half_word: u16) -> Result<Instruction, InstructionDecodeErr
             // println!("New load and store instruction!, op = {op:02b}");
             // Err(InstructionDecodeError::UnknownThumb(half_word))
         }
-        unknown_op_code_2 => {
+        _ => {
             unreachable!("op_code_2 should be < 0b111");
         }
     }

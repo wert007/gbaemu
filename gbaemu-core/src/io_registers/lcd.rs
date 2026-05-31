@@ -64,7 +64,7 @@ pub struct Color {
 }
 
 impl Color {
-    const RED: Color = Self {
+    pub const RED: Color = Self {
         r: 1.0,
         g: 0.0,
         b: 0.0,

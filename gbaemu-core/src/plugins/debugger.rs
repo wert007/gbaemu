@@ -1,3 +1,6 @@
+mod commands;
+mod timetravel;
+
 use std::path::PathBuf;
 
 use crate::{
@@ -5,7 +8,11 @@ use crate::{
     instructions::{Instruction, display::DisplayContext},
     interrupts::Interrupt,
     memory::Memory,
-    plugins::{Plugin, PluginWishes, debug_symbols::DebugSymbols},
+    plugins::{
+        Plugin, PluginWishes,
+        debug_symbols::DebugSymbols,
+        debugger::{commands::Command, timetravel::History},
+    },
     registers::{Mode, RegisterIndex, RegisterList, Registers},
 };
 
@@ -42,10 +49,15 @@ pub struct MemoryAddressWatcher {
     pub step_on_write: bool,
 }
 
+pub struct InterruptHandler {
+    interrupt: Option<Interrupt>,
+    action: Box<dyn Fn(Interrupt) -> PluginWishes + Send + 'static>,
+}
+
 pub struct Debugger {
     log_file: Option<PathBuf>,
     breakpoints: Vec<Breakpoint>,
-    break_on_irq: Vec<Interrupt>,
+    interrupt_handler: Vec<InterruptHandler>,
     memory_address_watchers: Vec<MemoryAddressWatcher>,
     skipped_sections: Vec<(u32, u32)>,
     is_silent: bool,
@@ -54,14 +66,16 @@ pub struct Debugger {
     stackframe: Vec<u32>,
     debug_symbols: Vec<DebugSymbols>,
     registers: Registers,
+    history: History,
 }
 
 impl Debugger {
-    pub fn new(is_silent: bool) -> Self {
+    pub fn new(is_silent: bool, history_capacity: usize) -> Self {
         let debug_symbols_bios =
             serde_json5::from_str(include_str!("../../../assets/bios_symbols.json5")).unwrap();
         Self {
             log_file: None,
+            history: History::new(history_capacity),
             breakpoints: Vec::new(),
             memory_address_watchers: Vec::new(),
             is_stepping: false,
@@ -71,7 +85,7 @@ impl Debugger {
             debug_symbols: vec![debug_symbols_bios],
             registers: Registers::new(),
             skipped_sections: Vec::new(),
-            break_on_irq: Vec::new(),
+            interrupt_handler: Vec::new(),
         }
     }
 
@@ -96,6 +110,10 @@ impl Debugger {
             fragile: false,
         });
         self
+    }
+
+    pub fn panic_on(&mut self, ip: u32) -> &mut Self {
+        self.with_breakpoint_conditionally(ip, |_| panic!())
     }
 
     pub fn with_breakpoint_conditionally(
@@ -252,7 +270,24 @@ impl Debugger {
     }
 
     pub fn break_on_irq(&mut self, irq: crate::interrupts::Interrupt) -> &mut Self {
-        self.break_on_irq.push(irq);
+        self.interrupt_handler.push(InterruptHandler {
+            interrupt: Some(irq),
+            action: Box::new(|_| PluginWishes {
+                pause_execution: true,
+                ..Default::default()
+            }),
+        });
+        self
+    }
+
+    pub fn emit_interrupt_names(&mut self) -> &mut Self {
+        self.interrupt_handler.push(InterruptHandler {
+            interrupt: None,
+            action: Box::new(|i| {
+                println!("Interrupt {i:?} occured");
+                Default::default()
+            }),
+        });
         self
     }
 }
@@ -266,13 +301,16 @@ impl Plugin for Debugger {
 
     fn interrupt_occured(&mut self, interrupt: Interrupt) -> Option<PluginWishes> {
         let p = self
-            .break_on_irq
+            .interrupt_handler
             .iter()
-            .find(|i| **i == interrupt)
-            .map(|i| PluginWishes {
-                pause_execution: true,
-                ..Default::default()
-            })?;
+            .map(|i| {
+                if i.interrupt.is_none_or(|i| i == interrupt) {
+                    (i.action)(interrupt)
+                } else {
+                    Default::default()
+                }
+            })
+            .fold(PluginWishes::default(), |a, c| a.combined_with(c));
         if p.pause_execution() {
             self.is_stepping = true;
         }
@@ -287,6 +325,7 @@ impl Plugin for Debugger {
         ip: u32,
         memory: &mut Memory,
     ) {
+        self.history.finish_entry(*registers, memory);
         self.watch_stack_changes_afterwards(registers, instruction, ip);
 
         let mut messages: Vec<String> = Vec::new();
@@ -340,6 +379,7 @@ impl Plugin for Debugger {
                     is_tty: true,
                     register_values: *registers,
                     use_register_values: false,
+                    display_memory_offsets: false,
                 })
             ));
             self.println(format!(
@@ -349,6 +389,7 @@ impl Plugin for Debugger {
                     is_tty: true,
                     register_values: *registers,
                     use_register_values: true,
+                    display_memory_offsets: true,
                 })
             ));
         }
@@ -390,6 +431,8 @@ impl Plugin for Debugger {
         memory: &Memory,
     ) -> PluginWishes {
         self.registers = *registers;
+        self.history
+            .start_entry(ip, *registers, *instruction, memory);
         let should_continue = !self.is_stepping
             && !self
                 .breakpoints
@@ -409,6 +452,7 @@ impl Plugin for Debugger {
                     is_tty: true,
                     register_values: *registers,
                     use_register_values: false,
+                    display_memory_offsets: false,
                 })
             ));
             self.println(format!(
@@ -418,104 +462,24 @@ impl Plugin for Debugger {
                     is_tty: true,
                     register_values: *registers,
                     use_register_values: true,
+                    display_memory_offsets: true,
                 })
             ));
         }
         if should_continue {
             return PluginWishes::default();
         }
-        // self.stackframe.pop_if(|s| s == ip);
         self.breakpoints.retain(|b| b.ip != ip || !b.fragile);
         let mut line = String::new();
         println!("Press [c] to continue");
         std::io::stdin().read_line(&mut line).unwrap();
-        let mut pause_execution = true;
-        match line.to_lowercase().trim() {
-            "r" => {
-                registers.dump();
+        let cmd = Command::parse(line.to_lowercase().trim());
+        match cmd {
+            Ok(cmd) => cmd.execute(self, *registers, ip, memory),
+            Err(()) => {
+                println!("Failed parsing command..");
+                PluginWishes::default()
             }
-            "j" => {
-                if let Some(target) = self.stackframe.iter().copied().filter(|t| *t != ip).last() {
-                    self.breakpoints.push(Breakpoint {
-                        ip: target,
-                        condition: None,
-                        action: None,
-                        fragile: true,
-                    });
-                    self.is_stepping = false;
-                    pause_execution = false;
-                } else {
-                    println!("Stackframe is empty. No function to jump to.")
-                }
-            }
-            "cb" => {
-                self.print_stack_frame(ip);
-            }
-            "c" => {
-                self.is_stepping = false;
-                pause_execution = false;
-            }
-            "s" => {
-                self.is_silent = !self.is_silent;
-            }
-            cmd => {
-                if let Some((address, size)) = try_parse_memory_address(cmd, registers) {
-                    let value = match size {
-                        1 => memory.read_byte_at_silent(address) as i8 as u32,
-                        2 => memory.read_half_word_at_silent(address) as i16 as u32,
-                        4 => memory.read_word_silent(address),
-                        _ => unreachable!(),
-                    };
-                    self.println(format!(" = {value:#x} ({value}|{})", value as i32));
-                } else if let Some(register) = try_parse_register(cmd) {
-                    let value = registers.read(register);
-                    self.println(format!(" = {value:#x} ({value}|{})", value as i32));
-                } else {
-                    pause_execution = false;
-                }
-            }
-        }
-        PluginWishes {
-            pause_execution,
-            stop_execution: false,
         }
     }
-}
-
-fn try_parse_memory_address(cmd: &str, registers: &Registers) -> Option<(u32, usize)> {
-    let size = match cmd.chars().next()? {
-        'b' => 1,
-        'h' => 2,
-        _ => 4,
-    };
-    let cmd = cmd.trim_start_matches(['b', 'h', 'w', ' ']);
-    let addr_str = cmd.strip_prefix('[')?.strip_suffix(']')?;
-    let addr = u32::from_str_radix(addr_str, 16).ok().or_else(|| {
-        let r = try_parse_register(addr_str)?;
-        Some(registers.read_raw(r))
-    })?;
-    Some((addr, size))
-}
-
-fn try_parse_register(register_ref: &str) -> Option<RegisterIndex> {
-    let register_name = register_ref.strip_prefix("r:")?;
-    Some(match register_name.trim().to_lowercase().as_str() {
-        "r0" | "0" => RegisterIndex::R0,
-        "r1" | "1" => RegisterIndex::R1,
-        "r2" | "2" => RegisterIndex::R2,
-        "r3" | "3" => RegisterIndex::R3,
-        "r4" | "4" => RegisterIndex::R4,
-        "r5" | "5" => RegisterIndex::R5,
-        "r6" | "6" => RegisterIndex::R6,
-        "r7" | "7" => RegisterIndex::R7,
-        "r8" | "8" => RegisterIndex::R8,
-        "r9" | "9" => RegisterIndex::R9,
-        "r10" | "10" => RegisterIndex::R10,
-        "r11" | "11" => RegisterIndex::R11,
-        "r12" | "12" => RegisterIndex::R12,
-        "sp" => RegisterIndex::Sp,
-        "lr" => RegisterIndex::Lr,
-        "ip" => RegisterIndex::Ip,
-        _ => return None,
-    })
 }

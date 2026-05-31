@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, fmt::Debug, time::Instant};
+use std::{collections::VecDeque, fmt::Debug};
 
 use crate::{interrupts::Interrupt, memory::MemoryPlugin};
 
@@ -43,8 +43,9 @@ impl InterruptWaitstate {
     }
 
     fn can_fire_again(&mut self, interrupt: Interrupt, tick: usize) -> bool {
+        let last_time_general = self.interrupt_last_firing_time.iter().max().unwrap();
         let last_time = self.interrupt_last_firing_time[interrupt.to_bit_index() as usize];
-        if last_time + interrupt.min_fire_cooldown() < tick {
+        if last_time_general + 1000 < tick && last_time + interrupt.min_fire_cooldown() < tick {
             self.interrupt_last_firing_time[interrupt.to_bit_index() as usize] = tick;
             true
         } else {

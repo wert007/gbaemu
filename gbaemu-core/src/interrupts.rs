@@ -14,7 +14,7 @@ impl Interrupt {
         match self {
             Interrupt::Vblank => 1000,
             Interrupt::SerialCom => 1000,
-            // Interrupt::Vblank => 279666 >> 10,
+            // Interrupt::Vblank => 279666,
         }
     }
 }
